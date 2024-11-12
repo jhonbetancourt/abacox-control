@@ -79,33 +79,33 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     }
 
     @Transactional
-    public void updateModuleInfo(UUID moduleId){
+    public Module update(UUID moduleId){
         Module module = get(moduleId);
 
         ModuleInfo moduleInfo = getModuleInfo(module.getUrl(), restClient);
         List<MEndpointInfo> endpointsInfo = getEndpointsInfo(module.getUrl(), restClient);
 
-        module = module.toBuilder()
-                .name(moduleInfo.getName())
-                .description(moduleInfo.getDescription())
-                .version(moduleInfo.getVersion())
-                .prefix(moduleInfo.getPrefix())
-                .build();
+        module.setName(moduleInfo.getName());
+        module.setType(ModuleType.valueOf(moduleInfo.getType()));
+        module.setDescription(moduleInfo.getDescription());
+        module.setVersion(moduleInfo.getVersion());
+        module.setPrefix(moduleInfo.getPrefix());
 
-        Module finalModule = module;
         Set<ModuleEndpoint> endpoints = endpointsInfo.stream()
                 .map(e -> ModuleEndpoint.builder()
                         .path(e.getPath())
                         .method(e.getMethod())
                         .secured(e.isSecured())
-                        .module(finalModule)
+                        .module(module)
                         .build())
                 .collect(Collectors.toSet());
 
-        module.setEndpoints(endpoints);
+        module.getEndpoints().clear();
+        module.getEndpoints().addAll(endpoints);
         validate(module);
         save(module);
         updateGateway();
+        return module;
     }
 
     private List<MEndpointInfo> getEndpointsInfo(String url, RestClient restClient) {
