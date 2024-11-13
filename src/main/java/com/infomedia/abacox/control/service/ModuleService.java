@@ -6,7 +6,6 @@ import com.infomedia.abacox.control.dto.gateway.RouteDefinition;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
 import com.infomedia.abacox.control.dto.moduleext.MEndpointInfo;
 import com.infomedia.abacox.control.dto.moduleext.ModuleInfo;
-import com.infomedia.abacox.control.dto.superclass.ActivationDto;
 import com.infomedia.abacox.control.entity.Module;
 import com.infomedia.abacox.control.entity.ModuleEndpoint;
 import com.infomedia.abacox.control.exception.ResourceNotFoundException;
@@ -33,6 +32,14 @@ import java.util.stream.Collectors;
 @Service
 @Log4j2
 public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
+
+    private static final String CONTROL_MODULE_NAME = "Control Module";
+    private static final String CONTROL_MODULE_DESCRIPTION = "Control Module";
+    private static final String CONTROL_MODULE_VERSION = "1.0";
+    private static final String CONTROL_MODULE_PREFIX = "control";
+    private static final String CONTROL_MODULE_URL = "N/A";
+
+
     private final GatewayService gatewayService;
     private final ApplicationContext applicationContext;
     private RestClient restClient;
@@ -74,13 +81,16 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 .collect(Collectors.toSet());
 
         module.setEndpoints(endpoints);
-        validate(module);
+        validateModuleType(module);
         return module;
     }
 
     @Transactional
     public Module update(UUID moduleId){
         Module module = get(moduleId);
+        if(module.getType().equals(ModuleType.CONTROL)){
+            return module;
+        }
 
         ModuleInfo moduleInfo = getModuleInfo(module.getUrl(), restClient);
         List<MEndpointInfo> endpointsInfo = getEndpointsInfo(module.getUrl(), restClient);
@@ -102,7 +112,7 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
 
         module.getEndpoints().clear();
         module.getEndpoints().addAll(endpoints);
-        validate(module);
+        validateModuleType(module);
         save(module);
         updateGateway();
         return module;
@@ -129,12 +139,23 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 .body(ModuleInfo.class);
     }
 
-    private void validate(Module module) {
-        if (module.getType().equals(ModuleType.USERS) && getRepository().existsByType(ModuleType.USERS)) {
-            throw new IllegalArgumentException("Only one module of type USERS is allowed");
-        }
-        if (module.getType().equals(ModuleType.CONTROL) && getRepository().existsByType(ModuleType.CONTROL)) {
-            throw new IllegalArgumentException("Only one module of type CONTROL is allowed");
+    private void validateModuleType(Module module) {
+        RuntimeException controlModuleError = new IllegalArgumentException("Only one module of type CONTROL is allowed");
+        RuntimeException usersModuleError = new IllegalArgumentException("Only one module of type USERS is allowed");
+        if(module.getId()==null){
+            if (module.getType().equals(ModuleType.USERS) && getRepository().existsByType(ModuleType.USERS)) {
+                throw usersModuleError;
+            }
+            if (module.getType().equals(ModuleType.CONTROL) && getRepository().existsByType(ModuleType.CONTROL)) {
+                throw controlModuleError;
+            }
+        }else{
+            if (module.getType().equals(ModuleType.USERS) && getRepository().existsByTypeAndIdNot(ModuleType.USERS, module.getId())) {
+                throw usersModuleError;
+            }
+            if (module.getType().equals(ModuleType.CONTROL) && getRepository().existsByTypeAndIdNot(ModuleType.CONTROL, module.getId())) {
+                throw controlModuleError;
+            }
         }
     }
 
@@ -185,12 +206,12 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         Module module = getRepository().findByType(ModuleType.CONTROL)
                 .orElse(new Module());
         module = module.toBuilder()
-                .name("Control Module")
+                .name(CONTROL_MODULE_NAME)
                 .type(ModuleType.CONTROL)
-                .description("Control Module")
-                .version("5.1")
-                .prefix("control")
-                .url("N/A")
+                .description(CONTROL_MODULE_DESCRIPTION)
+                .version(CONTROL_MODULE_VERSION)
+                .prefix(CONTROL_MODULE_PREFIX)
+                .url(CONTROL_MODULE_URL)
                 .build();
 
         if (module.getEndpoints() == null) {

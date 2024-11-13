@@ -19,4 +19,7 @@ public interface ModuleRepository extends JpaRepository<Module, UUID>, JpaSpecif
 
     boolean existsByTypeAndActive(ModuleType type, boolean active);
 
+    boolean existsByTypeAndIdNot(ModuleType type, UUID id);
+
+
 }
