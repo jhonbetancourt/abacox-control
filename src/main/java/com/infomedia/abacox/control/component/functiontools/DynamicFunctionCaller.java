@@ -1,4 +1,4 @@
-package com.infomedia.abacox.control.component.remotefunction;
+package com.infomedia.abacox.control.component.functiontools;
 
 import org.springframework.core.DefaultParameterNameDiscoverer;
 import org.springframework.core.ParameterNameDiscoverer;

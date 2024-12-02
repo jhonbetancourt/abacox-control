@@ -1,8 +1,8 @@
 package com.infomedia.abacox.control.service;
 
-import com.infomedia.abacox.control.component.remotefunction.BeanScanner;
-import com.infomedia.abacox.control.component.remotefunction.DynamicFunctionCaller;
-import com.infomedia.abacox.control.component.remotefunction.FunctionResult;
+import com.infomedia.abacox.control.component.functiontools.BeanScanner;
+import com.infomedia.abacox.control.component.functiontools.DynamicFunctionCaller;
+import com.infomedia.abacox.control.component.functiontools.FunctionResult;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -12,17 +12,18 @@ import java.util.Map;
 
 @Service
 @Log4j2
-public class RemoteFunctionService {
+public class LocalFunctionService {
     private final BeanScanner beanScanner;
     private Map<String, Object> serviceInstances;
 
-    public RemoteFunctionService(BeanScanner beanScanner) {
+    public LocalFunctionService(BeanScanner beanScanner) {
         this.beanScanner = beanScanner;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     private void init() {
         serviceInstances = beanScanner.scanAndGetBeans(getClass().getPackageName());
+        serviceInstances.remove("localFunctionService");
         serviceInstances.remove("remoteFunctionService");
         log.info("Loaded service instances: {}", serviceInstances.keySet());
     }

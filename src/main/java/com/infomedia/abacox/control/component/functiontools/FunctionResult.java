@@ -1,4 +1,4 @@
-package com.infomedia.abacox.control.component.remotefunction;
+package com.infomedia.abacox.control.component.functiontools;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

@@ -1,10 +1,10 @@
 package com.infomedia.abacox.control.component.events;
 
-import com.infomedia.abacox.control.component.remotefunction.FunctionResult;
+import com.infomedia.abacox.control.component.functiontools.FunctionResult;
 import com.infomedia.abacox.control.entity.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infomedia.abacox.control.service.RemoteFunctionService;
+import com.infomedia.abacox.control.service.LocalFunctionService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.ContextClosedEvent;
@@ -35,7 +35,7 @@ public class EventsWebSocketClient {
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
     @Autowired
-    private RemoteFunctionService remoteFunctionService;
+    private LocalFunctionService localFunctionService;
 
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
@@ -256,7 +256,7 @@ public class EventsWebSocketClient {
                     RequestMessage requestMessage = objectMapper.readValue(payload, RequestMessage.class);
                     log.info("Received RequestMessage for session {}: {}", moduleSession.getId(), requestMessage);
 
-                    FunctionResult functionResult = remoteFunctionService.callFunction(requestMessage.getService(), requestMessage.getFunction(), requestMessage.getArguments());
+                    FunctionResult functionResult = localFunctionService.callFunction(requestMessage.getService(), requestMessage.getFunction(), requestMessage.getArguments());
 
                     ResponseMessage responseMessage = ResponseMessage.builder()
                             .id(requestMessage.getId())

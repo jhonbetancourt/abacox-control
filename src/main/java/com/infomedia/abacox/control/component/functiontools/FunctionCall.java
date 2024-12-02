@@ -1,4 +1,4 @@
-package com.infomedia.abacox.control.component.remotefunction;
+package com.infomedia.abacox.control.component.functiontools;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;

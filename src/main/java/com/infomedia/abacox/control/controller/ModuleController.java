@@ -1,8 +1,8 @@
 package com.infomedia.abacox.control.controller;
 
 import com.infomedia.abacox.control.component.modeltools.ModelConverter;
-import com.infomedia.abacox.control.component.remotefunction.FunctionCall;
-import com.infomedia.abacox.control.component.remotefunction.FunctionResult;
+import com.infomedia.abacox.control.component.functiontools.FunctionCall;
+import com.infomedia.abacox.control.component.functiontools.FunctionResult;
 import com.infomedia.abacox.control.component.springfilter.boot.Filter;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
 import com.infomedia.abacox.control.dto.module.ModuleConnectedDto;
@@ -11,7 +11,7 @@ import com.infomedia.abacox.control.dto.superclass.ActivationDto;
 import com.infomedia.abacox.control.entity.Module;
 import com.infomedia.abacox.control.service.ModuleService;
 
-import com.infomedia.abacox.control.service.RemoteFunctionService;
+import com.infomedia.abacox.control.service.LocalFunctionService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,7 +34,7 @@ public class ModuleController {
 
     private final ModuleService moduleService;
     private final ModelConverter modelConverter;
-    private final RemoteFunctionService remoteFunctionService;
+    private final LocalFunctionService localFunctionService;
 
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -77,6 +77,6 @@ public class ModuleController {
 
     @PostMapping("/function/call")
     public FunctionResult callFunction(@Valid @RequestBody FunctionCall fc) {
-        return remoteFunctionService.callFunction(fc.getService(), fc.getFunction(), fc.getArguments());
+        return localFunctionService.callFunction(fc.getService(), fc.getFunction(), fc.getArguments());
     }
 }
