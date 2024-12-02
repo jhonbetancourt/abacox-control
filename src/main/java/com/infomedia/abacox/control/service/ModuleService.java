@@ -342,4 +342,18 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         }
         gatewayService.updateRoutes(routes);
     }
+
+    public ModuleInfo getInfoByPrefix(String prefix) {
+        Module module = getRepository().findByPrefixAndActive(prefix, true)
+                .orElseThrow(() -> new ResourceNotFoundException(Module.class, prefix));
+
+        return ModuleInfo.builder()
+                .name(module.getName())
+                .type(module.getType().name())
+                .description(module.getDescription())
+                .version(module.getVersion())
+                .prefix(module.getPrefix())
+                .url(module.getUrl())
+                .build();
+    }
 }

@@ -1,9 +1,12 @@
 package com.infomedia.abacox.control.component.events;
 
+import com.infomedia.abacox.control.component.remotefunction.FunctionResult;
 import com.infomedia.abacox.control.entity.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infomedia.abacox.control.service.RemoteFunctionService;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -31,6 +34,8 @@ public class EventsWebSocketClient {
     private final Map<UUID, Integer> reconnectAttempts;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    @Autowired
+    private RemoteFunctionService remoteFunctionService;
 
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
@@ -155,20 +160,20 @@ public class EventsWebSocketClient {
         return Math.min(INITIAL_RECONNECT_DELAY * (1 << Math.min(attempts, 30)), MAX_RECONNECT_DELAY);
     }
 
-    public void sendEventMessage(UUID sessionId, EventMessage eventMessage) {
+    public void sendMessage(UUID sessionId, WSMessage wsMessage) {
         ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
         if (moduleSession != null && moduleSession.getSession() != null && moduleSession.getSession().isOpen()) {
             try {
-                String jsonMessage = objectMapper.writeValueAsString(eventMessage);
+                String jsonMessage = objectMapper.writeValueAsString(wsMessage);
                 moduleSession.getSession().send(Mono.just(moduleSession.getSession().textMessage(jsonMessage)))
-                        .doOnSuccess(ignored -> log.info("Sent EventMessage to session {}: {}", sessionId, jsonMessage))
+                        .doOnSuccess(ignored -> log.info("Sent WSMessage to session {}: {}", sessionId, jsonMessage))
                         .doOnError(error -> {
-                            log.error("Error sending EventMessage to session {}: {}", sessionId, error.getMessage());
+                            log.error("Error sending WSMessage to session {}: {}", sessionId, error.getMessage());
                             scheduleReconnect(sessionId);
                         })
                         .subscribe();
             } catch (Exception e) {
-                log.error("Error preparing EventMessage for session {}: {}", sessionId, e.getMessage());
+                log.error("Error preparing WSMessage for session {}: {}", sessionId, e.getMessage());
             }
         } else {
             log.warn("WebSocket session {} is not open", sessionId);
@@ -177,19 +182,20 @@ public class EventsWebSocketClient {
     }
 
     public void sendEventMessageAll(EventMessage eventMessage) {
-        moduleSessions.values().forEach(moduleSession -> sendEventMessage(moduleSession.getId(), eventMessage));
+        moduleSessions.values().forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
     }
 
     public void sendEventMessageAllExcept(UUID sessionId, EventMessage eventMessage) {
         moduleSessions.values().stream()
                 .filter(moduleSession -> !moduleSession.getId().equals(sessionId))
-                .forEach(moduleSession -> sendEventMessage(moduleSession.getId(), eventMessage));
+                .forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
     }
 
     public void sendEventMessageAllExceptAndConsumes(UUID sessionId, EventMessage eventMessage) {
         moduleSessions.values().stream()
-                .filter(moduleSession -> !moduleSession.getId().equals(sessionId) && moduleSession.getConsumes().contains(eventMessage.getType()))
-                .forEach(moduleSession -> sendEventMessage(moduleSession.getId(), eventMessage));
+                .filter(moduleSession -> !moduleSession.getId().equals(sessionId)
+                        && moduleSession.getConsumes().contains(eventMessage.getEventType().name()))
+                .forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
     }
 
     public void disconnect(UUID sessionId) {
@@ -220,14 +226,53 @@ public class EventsWebSocketClient {
     }
 
     private void handleTextMessage(ModuleWebSocketSession moduleSession, WebSocketMessage message) {
+        String payload = message.getPayloadAsText();
+        new Thread(() -> processMessage(moduleSession, payload)).start();
+    }
+
+    private void processMessage(ModuleWebSocketSession moduleSession, String payload) {
+        log.info("Received message for session {}: {}", moduleSession.getId(), payload);
+        WSMessage wsMessage = null;
         try {
-            EventMessage eventMessage = objectMapper.readValue(message.getPayloadAsText(), EventMessage.class);
-            log.info("Received EventMessage for session {}: {}", moduleSession.getId(), eventMessage);
-            if (moduleSession.getProduces().contains(eventMessage.getType())) {
-                sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
-            }
+            wsMessage = objectMapper.readValue(payload, WSMessage.class);
         } catch (Exception e) {
-            log.error("Error handling received message: {}", e.getMessage());
+            log.error("Error processing message: " + e.getMessage(), e);
+        }
+
+        if(wsMessage!=null){
+            if(wsMessage.getMessagetype().equals(MessageType.EVENT)) {
+                try {
+                    EventMessage eventMessage = objectMapper.readValue(payload, EventMessage.class);
+                    log.info("Received EventMessage for session {}: {}", moduleSession.getId(), eventMessage);
+                    if (moduleSession.getProduces().contains(eventMessage.getEventType().name())) {
+                        sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
+                    }
+                } catch (Exception e) {
+                    log.error("Error handling received message: {}", e.getMessage());
+                }
+            }
+            if (wsMessage.getMessagetype().equals(MessageType.REQUEST)) {
+                try {
+                    RequestMessage requestMessage = objectMapper.readValue(payload, RequestMessage.class);
+                    log.info("Received RequestMessage for session {}: {}", moduleSession.getId(), requestMessage);
+
+                    FunctionResult functionResult = remoteFunctionService.callFunction(requestMessage.getService(), requestMessage.getFunction(), requestMessage.getArguments());
+
+                    ResponseMessage responseMessage = ResponseMessage.builder()
+                            .id(requestMessage.getId())
+                            .timestamp(requestMessage.getTimestamp())
+                            .source("control")
+                            .messagetype(MessageType.RESPONSE)
+                            .success(functionResult.isSuccess())
+                            .result(functionResult.getResult())
+                            .exception(functionResult.getException())
+                            .errorMessage(functionResult.getMessage())
+                            .build();
+                    sendMessage(moduleSession.getId(), responseMessage);
+                } catch (Exception e) {
+                    log.error("Error handling received message: {}", e.getMessage());
+                }
+            }
         }
     }
 

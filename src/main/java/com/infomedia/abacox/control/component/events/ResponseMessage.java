@@ -14,18 +14,12 @@ import java.util.UUID;
 @NoArgsConstructor
 @Data
 @SuperBuilder(toBuilder = true)
-public class EventMessage extends WSMessage{
+public class ResponseMessage extends WSMessage {
     private UUID id;
     private String source;
     private Instant timestamp;
-    private EventType eventType;
-    private String content;
-
-    public EventMessage(String source, EventType eventType, String content) {
-        this.id = UUID.randomUUID();
-        this.eventType = eventType;
-        this.timestamp = Instant.now();
-        this.content = content;
-        this.source = source;
-    }
+    private boolean success;
+    private String exception;
+    private String errorMessage;
+    private Object result;
 }

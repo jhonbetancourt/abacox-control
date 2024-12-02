@@ -130,7 +130,7 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             //add to headers
             if(userJson != null){
                 exchange.getRequest().mutate()
-                        .header("X-User", Base64.getEncoder().encodeToString(userJson.toString().getBytes()))
+                        .header("X-Username", username)
                         .build();
             }
 

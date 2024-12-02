@@ -1,6 +1,8 @@
 package com.infomedia.abacox.control.controller;
 
 import com.infomedia.abacox.control.component.modeltools.ModelConverter;
+import com.infomedia.abacox.control.component.remotefunction.FunctionCall;
+import com.infomedia.abacox.control.component.remotefunction.FunctionResult;
 import com.infomedia.abacox.control.component.springfilter.boot.Filter;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
 import com.infomedia.abacox.control.dto.module.ModuleConnectedDto;
@@ -9,6 +11,7 @@ import com.infomedia.abacox.control.dto.superclass.ActivationDto;
 import com.infomedia.abacox.control.entity.Module;
 import com.infomedia.abacox.control.service.ModuleService;
 
+import com.infomedia.abacox.control.service.RemoteFunctionService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,6 +34,7 @@ public class ModuleController {
 
     private final ModuleService moduleService;
     private final ModelConverter modelConverter;
+    private final RemoteFunctionService remoteFunctionService;
 
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -69,5 +73,10 @@ public class ModuleController {
             , @RequestParam(required = false) String filter, @RequestParam(required = false) Integer page
             , @RequestParam(required = false) Integer size, @RequestParam(required = false) String sort) {
         return modelConverter.mapPage(moduleService.find(spec, pageable), ModuleDto.class);
+    }
+
+    @PostMapping("/function/call")
+    public FunctionResult callFunction(@Valid @RequestBody FunctionCall fc) {
+        return remoteFunctionService.callFunction(fc.getService(), fc.getFunction(), fc.getArguments());
     }
 }

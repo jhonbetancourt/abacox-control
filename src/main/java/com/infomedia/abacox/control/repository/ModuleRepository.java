@@ -21,5 +21,7 @@ public interface ModuleRepository extends JpaRepository<Module, UUID>, JpaSpecif
 
     boolean existsByTypeAndIdNot(ModuleType type, UUID id);
 
+    Optional<Module> findByPrefixAndActive(String prefix, boolean active);
+
 
 }
