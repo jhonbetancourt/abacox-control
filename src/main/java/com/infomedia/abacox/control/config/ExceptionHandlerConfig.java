@@ -32,6 +32,7 @@ import reactor.core.publisher.Mono;
 import java.net.ConnectException;
 import java.net.URI;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -143,7 +144,7 @@ public class ExceptionHandlerConfig extends AbstractErrorWebExceptionHandler {
         problemDetail.put("instance", URI.create(path));
 
         Map<String, Object> properties = new HashMap<>();
-        properties.put("timestamp", Instant.now());
+        properties.put("timestamp", LocalDateTime.now());
 
         problemDetail.put("properties", properties);
 
