@@ -2,10 +2,13 @@ package com.infomedia.abacox.control.component.events;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+
 import java.util.UUID;
 
 @EqualsAndHashCode(callSuper = true)
 @Data
+@NoArgsConstructor
 public class CommandResponseMessage extends WSMessage {
     private boolean success;
     private String exception;

@@ -2,11 +2,13 @@ package com.infomedia.abacox.control.component.events;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
 
 import java.util.Map;
 
 @EqualsAndHashCode(callSuper = true)
 @Data
+@NoArgsConstructor
 public class CommandRequestMessage extends WSMessage{
     private String command;
     private Map<String, Object> arguments;

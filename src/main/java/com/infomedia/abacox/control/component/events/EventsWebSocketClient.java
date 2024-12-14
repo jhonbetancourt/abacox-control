@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -34,6 +35,8 @@ public class EventsWebSocketClient {
     private final ObjectMapper objectMapper;
     @Setter
     private CommandHandler commandHandler;
+    @Value("${spring.application.prefix}")
+    private String source;
 
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
@@ -258,9 +261,9 @@ public class EventsWebSocketClient {
                         CommandResult commandResult = commandHandler.handleCommand(commandRequestMessage.getCommand(), commandRequestMessage.getArguments());
                         CommandResponseMessage commandResponseMessage;
                         if(commandResult.isSuccess()){
-                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, "control", commandResult.getResult());
+                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, source, commandResult.getResult());
                         }else{
-                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, "control"
+                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, source
                                     , commandResult.getException(), commandResult.getMessage());
                         }
                         sendMessage(moduleSession.getId(), commandResponseMessage);
