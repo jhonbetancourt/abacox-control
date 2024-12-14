@@ -1,0 +1,19 @@
+package com.infomedia.abacox.control.component.events;
+
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+import java.util.Map;
+
+@EqualsAndHashCode(callSuper = true)
+@Data
+public class CommandRequestMessage extends WSMessage{
+    private String command;
+    private Map<String, Object> arguments;
+
+    public CommandRequestMessage(String source, String command, Map<String, Object> arguments) {
+        super(source, MessageType.COMMAND_REQUEST);
+        this.command = command;
+        this.arguments = arguments;
+    }
+}

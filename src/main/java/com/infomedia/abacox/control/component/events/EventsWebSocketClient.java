@@ -1,12 +1,10 @@
 package com.infomedia.abacox.control.component.events;
 
-import com.infomedia.abacox.control.component.functiontools.FunctionResult;
 import com.infomedia.abacox.control.entity.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infomedia.abacox.control.service.LocalFunctionService;
+import lombok.Setter;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -34,8 +32,8 @@ public class EventsWebSocketClient {
     private final Map<UUID, Integer> reconnectAttempts;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
-    @Autowired
-    private LocalFunctionService localFunctionService;
+    @Setter
+    private CommandHandler commandHandler;
 
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
@@ -243,7 +241,7 @@ public class EventsWebSocketClient {
             if(wsMessage.getMessagetype().equals(MessageType.EVENT)) {
                 try {
                     EventMessage eventMessage = objectMapper.readValue(payload, EventMessage.class);
-                    log.info("Received EventMessage for session {}: {}", moduleSession.getId(), eventMessage);
+                    log.info("Received Event Message for session {}: {}", moduleSession.getId(), eventMessage);
                     if (moduleSession.getProduces().contains(eventMessage.getEventType().name())) {
                         sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
                     }
@@ -251,29 +249,31 @@ public class EventsWebSocketClient {
                     log.error("Error handling received message: {}", e.getMessage());
                 }
             }
-            if (wsMessage.getMessagetype().equals(MessageType.REQUEST)) {
+            if (wsMessage.getMessagetype().equals(MessageType.COMMAND_REQUEST)) {
                 try {
-                    RequestMessage requestMessage = objectMapper.readValue(payload, RequestMessage.class);
-                    log.info("Received RequestMessage for session {}: {}", moduleSession.getId(), requestMessage);
+                    CommandRequestMessage commandRequestMessage = objectMapper.readValue(payload, CommandRequestMessage.class);
+                    log.info("Received Command Request Message for session {}: {}", moduleSession.getId(), commandRequestMessage);
 
-                    FunctionResult functionResult = localFunctionService.callFunction(requestMessage.getService(), requestMessage.getFunction(), requestMessage.getArguments());
-
-                    ResponseMessage responseMessage = ResponseMessage.builder()
-                            .id(requestMessage.getId())
-                            .timestamp(requestMessage.getTimestamp())
-                            .source("control")
-                            .messagetype(MessageType.RESPONSE)
-                            .success(functionResult.isSuccess())
-                            .result(functionResult.getResult())
-                            .exception(functionResult.getException())
-                            .errorMessage(functionResult.getMessage())
-                            .build();
-                    sendMessage(moduleSession.getId(), responseMessage);
+                    if(commandHandler!=null){
+                        CommandResult commandResult = commandHandler.handleCommand(commandRequestMessage.getCommand(), commandRequestMessage.getArguments());
+                        CommandResponseMessage commandResponseMessage;
+                        if(commandResult.isSuccess()){
+                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, "control", commandResult.getResult());
+                        }else{
+                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, "control"
+                                    , commandResult.getException(), commandResult.getMessage());
+                        }
+                        sendMessage(moduleSession.getId(), commandResponseMessage);
+                    }
                 } catch (Exception e) {
                     log.error("Error handling received message: {}", e.getMessage());
                 }
             }
         }
+    }
+
+    public interface CommandHandler {
+        CommandResult handleCommand(String command, Map<String, Object> args);
     }
 
     public boolean isConnected(UUID sessionId) {
