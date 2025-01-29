@@ -128,11 +128,6 @@ public class WebSocketServer implements WebSocketHandler {
     private void handleConnect(String clientId, Map<String, String> queryParams) {
         logger.info(String.format("Client connected - ID: %s, Params: %s", clientId, queryParams));
         broadcaster.tryEmitNext(String.format("User %s joined the server", clientId));
-        
-        if (queryParams.containsKey("userType")) {
-            String userType = queryParams.get("userType");
-            logger.info(String.format("Client %s connected as %s", clientId, userType));
-        }
     }
 
     private void handleMessage(WebSocketMessage message, String clientId) {
