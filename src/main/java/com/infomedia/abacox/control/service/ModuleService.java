@@ -305,6 +305,7 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 }
             }
         });
+        endpointInfos.add(new MEndpointInfo(RequestMethod.GET.toString(), "/websocket/**", true));
         endpointInfos.sort(Comparator.comparing(MEndpointInfo::getPath));
         return endpointInfos;
     }

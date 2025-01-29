@@ -1,5 +1,6 @@
 package com.infomedia.abacox.control.component.events;
 
+import com.infomedia.abacox.control.component.wsserver.WebSocketServer;
 import com.infomedia.abacox.control.entity.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Log4j2
 public class EventsWebSocketClient {
 
+    private final WebSocketServer server;
     private final WebSocketClient client;
     private final Map<UUID, ModuleWebSocketSession> moduleSessions;
     private final Map<UUID, Integer> reconnectAttempts;
@@ -41,7 +43,8 @@ public class EventsWebSocketClient {
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
 
-    public EventsWebSocketClient(ObjectMapper objectMapper) {
+    public EventsWebSocketClient(WebSocketServer server, ObjectMapper objectMapper) {
+        this.server = server;
         this.client = new ReactorNettyWebSocketClient();
         this.moduleSessions = new ConcurrentHashMap<>();
         this.reconnectAttempts = new ConcurrentHashMap<>();
@@ -232,7 +235,7 @@ public class EventsWebSocketClient {
     }
 
     private void processMessage(ModuleWebSocketSession moduleSession, String payload) {
-        log.info("Received message for session {}: {}", moduleSession.getId(), payload);
+        // log.info("Received message for session {}: {}", moduleSession.getId(), payload);
         WSMessage wsMessage = null;
         try {
             wsMessage = objectMapper.readValue(payload, WSMessage.class);
@@ -252,6 +255,17 @@ public class EventsWebSocketClient {
                     log.error("Error handling received message: {}", e.getMessage());
                 }
             }
+            if(wsMessage.getMessagetype().equals(MessageType.WS_EVENT)) {
+                try {
+                    WSEventMessage wsEventMessage = objectMapper.readValue(payload, WSEventMessage.class);
+                    log.info("Received WS Event Message for session {}: {}", moduleSession.getId(), wsEventMessage);
+                    server.sendMessageToModuleChannelTarget(wsEventMessage.getSource(), wsEventMessage.getChannel()
+                            , wsEventMessage.getTarget(), objectMapper.writeValueAsString(wsEventMessage));
+                } catch (Exception e) {
+                    log.error("Error handling received message: {}", e.getMessage());
+                }
+            }
+
             if (wsMessage.getMessagetype().equals(MessageType.COMMAND_REQUEST)) {
                 try {
                     CommandRequestMessage commandRequestMessage = objectMapper.readValue(payload, CommandRequestMessage.class);

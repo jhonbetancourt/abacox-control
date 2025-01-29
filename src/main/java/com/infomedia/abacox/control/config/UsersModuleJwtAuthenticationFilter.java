@@ -104,7 +104,8 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 throw new RuntimeException(e);
             }
         }
-        log.info("Path: " + exchange.getRequest().getPath().value() + " Secured: " + secured);
+        log.info("Method: " + exchange.getRequest().getMethod().name()+" Path: "
+                + exchange.getRequest().getPath().value() + " Secured: " + secured);
 
         String token = extractAccessToken(exchange);
         String queryToken = extractDownloadToken(exchange);
