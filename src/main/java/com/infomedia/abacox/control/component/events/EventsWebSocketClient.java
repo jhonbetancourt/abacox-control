@@ -21,13 +21,15 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.time.Duration;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @Log4j2
 public class EventsWebSocketClient {
+    private static final int INITIAL_RECONNECT_DELAY = 1;
+    private static final int MAX_RECONNECT_DELAY = 60;
 
     private final WebSocketServer server;
     private final WebSocketClient client;
@@ -35,13 +37,12 @@ public class EventsWebSocketClient {
     private final Map<UUID, Integer> reconnectAttempts;
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+
     @Setter
     private CommandHandler commandHandler;
+
     @Value("${spring.application.prefix}")
     private String source;
-
-    private static final int INITIAL_RECONNECT_DELAY = 1;
-    private static final int MAX_RECONNECT_DELAY = 60;
 
     public EventsWebSocketClient(WebSocketServer server, ObjectMapper objectMapper) {
         this.server = server;
@@ -54,62 +55,46 @@ public class EventsWebSocketClient {
 
     public void connect(Module module) {
         reconnectAttempts.put(module.getId(), 0);
-        URL url;
-        try {
-            url = new URL(module.getUrl());
-        } catch (MalformedURLException e) {
-            throw new RuntimeException(e);
-        }
-        String host = url.getHost();
-        int port = url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
-        String websocketUrl = "ws://" + host + ":" + port + "/websocket/module";
-        ModuleWebSocketSession moduleWebSocketSession = ModuleWebSocketSession.builder()
-                .id(module.getId())
-                .name(module.getName())
-                .websocketUrl(websocketUrl)
-                .url(module.getUrl())
-                .build();
-        doConnect(moduleWebSocketSession);
+        String websocketUrl = buildWebsocketUrl(module.getUrl());
+        ModuleWebSocketSession moduleSession = createModuleSession(module, websocketUrl);
+        doConnect(moduleSession);
     }
 
-    private void doConnect(ModuleWebSocketSession moduleWebSocketSession) {
-        UUID sessionId = moduleWebSocketSession.getId();
-        if (moduleSessions.containsKey(sessionId) && moduleSessions.get(sessionId).getSession() != null
-                && moduleSessions.get(sessionId).getSession().isOpen()) {
+    private void doConnect(ModuleWebSocketSession moduleSession) {
+        UUID sessionId = moduleSession.getId();
+        if (isValidSession(moduleSessions.get(sessionId))) {
             log.info("WebSocket session {} is already connected", sessionId);
             return;
         }
 
-        String websocketUrl = moduleWebSocketSession.getWebsocketUrl();
-        log.info("Initiating WebSocket connection for session {} to: {}", sessionId, websocketUrl);
+        log.info("Initiating WebSocket connection for session {} to: {}", 
+                sessionId, moduleSession.getWebsocketUrl());
 
-        getEventTypesInfo(moduleWebSocketSession.getUrl())
-                .flatMap(eventTypesInfo -> {
-                    moduleWebSocketSession.setProduces(eventTypesInfo.getProduces());
-                    moduleWebSocketSession.setConsumes(eventTypesInfo.getConsumes());
-                    return client.execute(URI.create(websocketUrl), createWebSocketHandler(moduleWebSocketSession));
-                })
-                .doOnSubscribe(subscription -> {
-                    moduleSessions.put(sessionId, moduleWebSocketSession);
-                })
-                .doOnError(error -> {
-                    log.error("Error connecting WebSocket session {}: {}", sessionId, error.getMessage());
-                    scheduleReconnect(sessionId);
-                })
+        getEventTypesInfo(moduleSession.getUrl())
+                .flatMap(eventTypesInfo -> setupSessionAndConnect(moduleSession, eventTypesInfo))
+                .doOnSubscribe(subscription -> moduleSessions.put(sessionId, moduleSession))
+                .doOnError(error -> handleConnectionError(sessionId, error))
                 .subscribe();
     }
 
-    private WebSocketHandler createWebSocketHandler(ModuleWebSocketSession moduleWebSocketSession) {
-        return session -> {
-            UUID sessionId = moduleWebSocketSession.getId();
-            moduleWebSocketSession.setSession(session);
-            log.info("WebSocket connection established for session: {}", sessionId);
+    private Mono<Void> setupSessionAndConnect(ModuleWebSocketSession moduleSession, EventTypesInfo eventTypesInfo) {
+        moduleSession.setProduces(eventTypesInfo.getProduces());
+        moduleSession.setConsumes(eventTypesInfo.getConsumes());
+        return client.execute(
+                URI.create(moduleSession.getWebsocketUrl()),
+                createWebSocketHandler(moduleSession)
+        );
+    }
 
-            // Reset reconnect attempts on successful connection
+    private WebSocketHandler createWebSocketHandler(ModuleWebSocketSession moduleSession) {
+        return session -> {
+            UUID sessionId = moduleSession.getId();
+            moduleSession.setSession(session);
+            log.info("WebSocket connection established for session: {}", sessionId);
             reconnectAttempts.remove(sessionId);
 
             return session.receive()
-                    .doOnNext(message -> handleTextMessage(moduleWebSocketSession, message))
+                    .doOnNext(message -> handleTextMessage(moduleSession, message))
                     .doOnComplete(() -> {
                         log.info("WebSocket session {} completed", sessionId);
                         scheduleReconnect(sessionId);
@@ -126,26 +111,26 @@ public class EventsWebSocketClient {
         return webClient.get()
                 .uri(baseUrl + "/api/module/eventTypes")
                 .retrieve()
-                .onStatus(status -> !status.is2xxSuccessful(), response -> response.bodyToMono(String.class)
-                        .flatMap(error -> {
-                            String detail = null;
-                            try {
-                                JsonNode errorNode = objectMapper.readTree(error);
-                                detail = errorNode.get("detail").asText();
-                            } catch (Exception ignored) {
-                            }
-                            return Mono.error(new RuntimeException(detail != null ? detail : "Error while getting event types info"));
-                        }))
+                .onStatus(status -> !status.is2xxSuccessful(),
+                        response -> response.bodyToMono(String.class)
+                                .flatMap(error -> {
+                                    String detail = null;
+                                    try {
+                                        JsonNode errorNode = objectMapper.readTree(error);
+                                        detail = errorNode.get("detail").asText();
+                                    } catch (Exception ignored) {
+                                    }
+                                    return Mono.error(new RuntimeException(
+                                            detail != null ? detail : "Error while getting event types info"));
+                                }))
                 .bodyToMono(EventTypesInfo.class);
     }
 
     private void scheduleReconnect(UUID sessionId) {
-        ModuleWebSocketSession moduleWebSocketSession = moduleSessions.get(sessionId);
-        if (moduleWebSocketSession == null) {
-            return;
-        }
-        int attempts = reconnectAttempts.getOrDefault(sessionId, 0);
+        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
+        if (moduleSession == null) return;
 
+        int attempts = reconnectAttempts.getOrDefault(sessionId, 0);
         int delay = calculateReconnectDelay(attempts);
         reconnectAttempts.put(sessionId, attempts + 1);
 
@@ -155,51 +140,118 @@ public class EventsWebSocketClient {
         Mono.delay(Duration.ofSeconds(delay))
                 .doOnNext(ignored -> {
                     log.info("Attempting to reconnect session {}", sessionId);
-                    doConnect(moduleWebSocketSession);
+                    doConnect(moduleSession);
                 })
                 .subscribe();
     }
 
-    private int calculateReconnectDelay(int attempts) {
-        return Math.min(INITIAL_RECONNECT_DELAY * (1 << Math.min(attempts, 30)), MAX_RECONNECT_DELAY);
-    }
-
     public void sendMessage(UUID sessionId, WSMessage wsMessage) {
         ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
-        if (moduleSession != null && moduleSession.getSession() != null && moduleSession.getSession().isOpen()) {
-            try {
-                String jsonMessage = objectMapper.writeValueAsString(wsMessage);
-                moduleSession.getSession().send(Mono.just(moduleSession.getSession().textMessage(jsonMessage)))
-                        .doOnSuccess(ignored -> log.info("Sent WSMessage to session {}: {}", sessionId, jsonMessage))
-                        .doOnError(error -> {
-                            log.error("Error sending WSMessage to session {}: {}", sessionId, error.getMessage());
-                            scheduleReconnect(sessionId);
-                        })
-                        .subscribe();
-            } catch (Exception e) {
-                log.error("Error preparing WSMessage for session {}: {}", sessionId, e.getMessage());
-            }
-        } else {
+        if (!isValidSession(moduleSession)) {
             log.warn("WebSocket session {} is not open", sessionId);
-            if(moduleSession!=null) scheduleReconnect(sessionId);
+            if (moduleSession != null) scheduleReconnect(sessionId);
+            return;
+        }
+
+        try {
+            String jsonMessage = objectMapper.writeValueAsString(wsMessage);
+            moduleSession.getSession()
+                    .send(Mono.just(moduleSession.getSession().textMessage(jsonMessage)))
+                    .doOnSuccess(ignored -> log.info("Sent WSMessage to session {}: {}", sessionId, jsonMessage))
+                    .doOnError(error -> {
+                        log.error("Error sending WSMessage to session {}: {}", sessionId, error.getMessage());
+                        scheduleReconnect(sessionId);
+                    })
+                    .subscribe();
+        } catch (Exception e) {
+            log.error("Error preparing WSMessage for session {}: {}", sessionId, e.getMessage());
         }
     }
 
     public void sendEventMessageAll(EventMessage eventMessage) {
-        moduleSessions.values().forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
+        moduleSessions.values().forEach(session -> 
+            sendMessage(session.getId(), eventMessage));
     }
 
     public void sendEventMessageAllExcept(UUID sessionId, EventMessage eventMessage) {
         moduleSessions.values().stream()
-                .filter(moduleSession -> !moduleSession.getId().equals(sessionId))
-                .forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
+                .filter(session -> !session.getId().equals(sessionId))
+                .forEach(session -> sendMessage(session.getId(), eventMessage));
     }
 
     public void sendEventMessageAllExceptAndConsumes(UUID sessionId, EventMessage eventMessage) {
         moduleSessions.values().stream()
-                .filter(moduleSession -> !moduleSession.getId().equals(sessionId)
-                        && moduleSession.getConsumes().contains(eventMessage.getEventType().name()))
-                .forEach(moduleSession -> sendMessage(moduleSession.getId(), eventMessage));
+                .filter(session -> !session.getId().equals(sessionId)
+                        && session.getConsumes().contains(eventMessage.getEventType().name()))
+                .forEach(session -> sendMessage(session.getId(), eventMessage));
+    }
+
+    private void handleTextMessage(ModuleWebSocketSession moduleSession, WebSocketMessage message) {
+        String payload = message.getPayloadAsText();
+        CompletableFuture.runAsync(() -> processMessage(moduleSession, payload));
+    }
+
+    private void processMessage(ModuleWebSocketSession moduleSession, String payload) {
+        try {
+            WSMessage wsMessage = objectMapper.readValue(payload, WSMessage.class);
+            switch (wsMessage.getMessagetype()) {
+                case EVENT -> handleEventMessage(moduleSession, payload);
+                case WS_EVENT -> handleWSEventMessage(moduleSession, payload);
+                case COMMAND_REQUEST -> handleCommandRequestMessage(moduleSession, payload);
+            }
+        } catch (Exception e) {
+            log.error("Error processing message: " + e.getMessage(), e);
+        }
+    }
+
+    private void handleEventMessage(ModuleWebSocketSession moduleSession, String payload) {
+        try {
+            EventMessage eventMessage = objectMapper.readValue(payload, EventMessage.class);
+            log.info("Received Event Message for session {}: {}", moduleSession.getId(), eventMessage);
+            if (moduleSession.getProduces().contains(eventMessage.getEventType().name())) {
+                sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
+            }
+        } catch (Exception e) {
+            log.error("Error handling event message: {}", e.getMessage());
+        }
+    }
+
+    private void handleWSEventMessage(ModuleWebSocketSession moduleSession, String payload) {
+        try {
+            WSEventMessage wsEventMessage = objectMapper.readValue(payload, WSEventMessage.class);
+            log.info("Received WS Event Message for session {}: {}", moduleSession.getId(), wsEventMessage);
+            server.sendMessageToModuleChannelTarget(
+                    wsEventMessage.getSource(),
+                    wsEventMessage.getChannel(),
+                    wsEventMessage.getTarget(),
+                    wsEventMessage.getOwner(),
+                    objectMapper.writeValueAsString(wsEventMessage)
+            );
+        } catch (Exception e) {
+            log.error("Error handling WS event message: {}", e.getMessage());
+        }
+    }
+
+    private void handleCommandRequestMessage(ModuleWebSocketSession moduleSession, String payload) {
+        try {
+            CommandRequestMessage commandRequestMessage = objectMapper.readValue(payload, CommandRequestMessage.class);
+            log.info("Received Command Request Message for session {}: {}", 
+                    moduleSession.getId(), commandRequestMessage);
+
+            if (commandHandler != null) {
+                CommandResult result = commandHandler.handleCommand(
+                        commandRequestMessage.getCommand(),
+                        commandRequestMessage.getArguments()
+                );
+                CommandResponseMessage response = result.isSuccess()
+                        ? new CommandResponseMessage(commandRequestMessage, source, result.getResult())
+                        : new CommandResponseMessage(commandRequestMessage, source,
+                                result.getException(), result.getMessage());
+                sendMessage(moduleSession.getId(), response);
+            }
+        } catch (Exception e) {
+            log.error("Error handling command request message: {}", e.getMessage());
+        }
     }
 
     public void disconnect(UUID sessionId) {
@@ -208,10 +260,9 @@ public class EventsWebSocketClient {
             moduleSessions.remove(sessionId);
             reconnectAttempts.remove(sessionId);
             moduleSession.getSession().close()
-                    .doOnSuccess(ignored -> {
-                        log.info("WebSocket session {} disconnected", sessionId);
-                    })
-                    .doOnError(error -> log.error("Error disconnecting WebSocket session {}: {}", sessionId, error.getMessage()))
+                    .doOnSuccess(ignored -> log.info("WebSocket session {} disconnected", sessionId))
+                    .doOnError(error -> log.error("Error disconnecting WebSocket session {}: {}", 
+                            sessionId, error.getMessage()))
                     .subscribe();
         }
     }
@@ -226,79 +277,53 @@ public class EventsWebSocketClient {
     }
 
     public void disconnectAll() {
-        moduleSessions.keySet().forEach(this::disconnect);
-    }
-
-    private void handleTextMessage(ModuleWebSocketSession moduleSession, WebSocketMessage message) {
-        String payload = message.getPayloadAsText();
-        new Thread(() -> processMessage(moduleSession, payload)).start();
-    }
-
-    private void processMessage(ModuleWebSocketSession moduleSession, String payload) {
-        // log.info("Received message for session {}: {}", moduleSession.getId(), payload);
-        WSMessage wsMessage = null;
-        try {
-            wsMessage = objectMapper.readValue(payload, WSMessage.class);
-        } catch (Exception e) {
-            log.error("Error processing message: " + e.getMessage(), e);
-        }
-
-        if(wsMessage!=null){
-            if(wsMessage.getMessagetype().equals(MessageType.EVENT)) {
-                try {
-                    EventMessage eventMessage = objectMapper.readValue(payload, EventMessage.class);
-                    log.info("Received Event Message for session {}: {}", moduleSession.getId(), eventMessage);
-                    if (moduleSession.getProduces().contains(eventMessage.getEventType().name())) {
-                        sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
-                    }
-                } catch (Exception e) {
-                    log.error("Error handling received message: {}", e.getMessage());
-                }
-            }
-            if(wsMessage.getMessagetype().equals(MessageType.WS_EVENT)) {
-                try {
-                    WSEventMessage wsEventMessage = objectMapper.readValue(payload, WSEventMessage.class);
-                    log.info("Received WS Event Message for session {}: {}", moduleSession.getId(), wsEventMessage);
-                    server.sendMessageToModuleChannelTarget(wsEventMessage.getSource(), wsEventMessage.getChannel()
-                            , wsEventMessage.getTarget(), objectMapper.writeValueAsString(wsEventMessage));
-                } catch (Exception e) {
-                    log.error("Error handling received message: {}", e.getMessage());
-                }
-            }
-
-            if (wsMessage.getMessagetype().equals(MessageType.COMMAND_REQUEST)) {
-                try {
-                    CommandRequestMessage commandRequestMessage = objectMapper.readValue(payload, CommandRequestMessage.class);
-                    log.info("Received Command Request Message for session {}: {}", moduleSession.getId(), commandRequestMessage);
-
-                    if(commandHandler!=null){
-                        CommandResult commandResult = commandHandler.handleCommand(commandRequestMessage.getCommand(), commandRequestMessage.getArguments());
-                        CommandResponseMessage commandResponseMessage;
-                        if(commandResult.isSuccess()){
-                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, source, commandResult.getResult());
-                        }else{
-                            commandResponseMessage = new CommandResponseMessage(commandRequestMessage, source
-                                    , commandResult.getException(), commandResult.getMessage());
-                        }
-                        sendMessage(moduleSession.getId(), commandResponseMessage);
-                    }
-                } catch (Exception e) {
-                    log.error("Error handling received message: {}", e.getMessage());
-                }
-            }
-        }
-    }
-
-    public interface CommandHandler {
-        CommandResult handleCommand(String command, Map<String, Object> args);
+        new ArrayList<>(moduleSessions.keySet()).forEach(this::disconnect);
     }
 
     public boolean isConnected(UUID sessionId) {
-        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
-        return moduleSession != null && moduleSession.getSession() != null && moduleSession.getSession().isOpen();
+        return isValidSession(moduleSessions.get(sessionId));
     }
 
     public boolean isConnected(Module module) {
         return isConnected(module.getId());
+    }
+
+    private String buildWebsocketUrl(String moduleUrl) {
+        try {
+            URL url = new URL(moduleUrl);
+            String host = url.getHost();
+            int port = url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
+            return String.format("ws://%s:%d/websocket/module", host, port);
+        } catch (MalformedURLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private ModuleWebSocketSession createModuleSession(Module module, String websocketUrl) {
+        return ModuleWebSocketSession.builder()
+                .id(module.getId())
+                .name(module.getName())
+                .websocketUrl(websocketUrl)
+                .url(module.getUrl())
+                .build();
+    }
+
+    private boolean isValidSession(ModuleWebSocketSession session) {
+        return session != null && 
+               session.getSession() != null && 
+               session.getSession().isOpen();
+    }
+
+    private void handleConnectionError(UUID sessionId, Throwable error) {
+        log.error("Error connecting WebSocket session {}: {}", sessionId, error.getMessage());
+        scheduleReconnect(sessionId);
+    }
+
+    private int calculateReconnectDelay(int attempts) {
+        return Math.min(INITIAL_RECONNECT_DELAY * (1 << Math.min(attempts, 30)), MAX_RECONNECT_DELAY);
+    }
+
+    public interface CommandHandler {
+        CommandResult handleCommand(String command, Map<String, Object> args);
     }
 }

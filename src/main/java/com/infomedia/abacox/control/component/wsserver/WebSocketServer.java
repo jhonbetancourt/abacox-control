@@ -1,9 +1,7 @@
 package com.infomedia.abacox.control.component.wsserver;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.infomedia.abacox.control.service.AuthService;
+import lombok.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.HandlerMapping;
@@ -13,27 +11,25 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import org.springframework.web.reactive.socket.server.support.WebSocketHandlerAdapter;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 
-import java.net.URI;
 import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Configuration
+@RequiredArgsConstructor
 public class WebSocketServer implements WebSocketHandler {
     private static final Logger logger = Logger.getLogger(WebSocketServer.class.getName());
-    private final Map<String, WSSession> sessions = new ConcurrentHashMap<>();
-    private final Sinks.Many<String> broadcaster = Sinks.many().multicast().onBackpressureBuffer();
+    private static final String WS_PATH = "/control/websocket/{module}/{channel}/{target}";
+    
+    private final SessionManager sessionManager;
+    private final MessageBroadcaster broadcaster;
+    private final AuthService authService;
 
     @Bean
     public HandlerMapping handlerMapping() {
-        // Support for path parameters using pattern
-        Map<String, WebSocketHandler> map = Collections.singletonMap("/control/websocket/{module}/{channel}/{target}", this);
+        Map<String, WebSocketHandler> map = Collections.singletonMap(WS_PATH, this);
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
         mapping.setUrlMap(map);
         mapping.setOrder(-1);
@@ -47,164 +43,92 @@ public class WebSocketServer implements WebSocketHandler {
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
-        URI uri = session.getHandshakeInfo().getUri();
-        String path = uri.getPath();
-        String query = uri.getQuery();
-
-        // Extract query parameters
-        Map<String, String> queryParams = parseQueryString(query);
-        // Extract path parameters
-        Map<String, String> pathParams = extractPathParameters(path);
-
-        if(pathParams.isEmpty()) {
-            logger.info(String.format("Invalid WebSocket path: %s", path));
-            return session.close();
-        }
+        String clientId = session.getId();
+        WebSocketConnection connection = WebSocketConnection.from(session);
         
-        String clientId= session.getId();
-        logger.info(String.format("New WebSocket connection - Client ID: %s, Path: %s, Query: %s, Path Params: %s"
-                , clientId, path, query, pathParams));
+        return authService.getUsername()
+                .flatMap(username -> {
+                    WSSession wsSession = createSession(clientId, connection, username);
+                    sessionManager.addSession(wsSession);
+                    logNewConnection(wsSession);
 
-        WSSession wsSession = WSSession.builder()
+                    return handleWebSocketCommunication(wsSession);
+                });
+    }
+
+    private WSSession createSession(String clientId, WebSocketConnection connection, String username) {
+        return WSSession.builder()
                 .clientId(clientId)
-                .session(session)
-                .module(pathParams.get("module"))
-                .channel(pathParams.get("channel"))
-                .target(pathParams.get("target"))
-                .params(queryParams)
+                .session(connection.getSession())
+                .module(connection.getPathParams().get("module"))
+                .channel(connection.getPathParams().get("channel"))
+                .target(connection.getPathParams().get("target"))
+                .owner(username)
+                .params(connection.getQueryParams())
                 .build();
+    }
 
-        sessions.put(clientId, wsSession);
+    private Mono<Void> handleWebSocketCommunication(WSSession wsSession) {
+        WebSocketSession session = wsSession.getSession();
+        String clientId = wsSession.getClientId();
 
-        Mono<Void> input = session.receive()
-            .doOnSubscribe(sub -> handleConnect(clientId, queryParams))
-            .doOnNext(message -> handleMessage(message, clientId))
-            .doOnError(error -> handleError(error, clientId))
-            .doOnComplete(() -> handleDisconnect(clientId))
-            .then();
-
-        Mono<Void> output = session.send(
-            broadcaster.asFlux()
-                .map(session::textMessage)
+        return session.receive()
+                .doOnSubscribe(sub -> broadcaster.announceConnection(clientId))
+                .doOnNext(message -> handleIncomingMessage(message, clientId))
                 .doOnError(error -> handleError(error, clientId))
-        );
-
-        return Mono.zip(input, output)
-            .doOnError(error -> handleError(error, clientId))
-            .then();
+                .doOnComplete(() -> handleDisconnection(clientId))
+                .then()
+                .and(session.send(broadcaster.getMessageFlux()
+                        .map(session::textMessage)
+                        .doOnError(error -> handleError(error, clientId))));
     }
 
-    private Map<String, String> parseQueryString(String query) {
-        Map<String, String> queryParams = new ConcurrentHashMap<>();
-        if (query != null && !query.isEmpty()) {
-            String[] pairs = query.split("&");
-            for (String pair : pairs) {
-                String[] keyValue = pair.split("=");
-                if (keyValue.length == 2) {
-                    queryParams.put(keyValue[0], keyValue[1]);
-                }
-            }
-        }
-        return queryParams;
-    }
-
-    private Map<String, String> extractPathParameters(String path) {
-        Map<String, String> pathParams = new ConcurrentHashMap<>();
-
-        // Define the pattern that matches your path template
-        Pattern pattern = Pattern.compile("control/websocket/([^/]+)/([^/]+)/([^/]+)");
-        Matcher matcher = pattern.matcher(path);
-
-        if (matcher.find()) {
-            pathParams.put("module", matcher.group(1));
-            pathParams.put("channel", matcher.group(2));
-            pathParams.put("target", matcher.group(3));
-        }
-
-        return pathParams;
-    }
-
-
-    private void handleConnect(String clientId, Map<String, String> queryParams) {
-        logger.info(String.format("Client connected - ID: %s, Params: %s", clientId, queryParams));
-        broadcaster.tryEmitNext(String.format("User %s joined the server", clientId));
-    }
-
-    private void handleMessage(WebSocketMessage message, String clientId) {
+    private void handleIncomingMessage(WebSocketMessage message, String clientId) {
         try {
             String payload = message.getPayloadAsText();
             logger.info(String.format("Received message from %s: %s", clientId, payload));
-            broadcaster.tryEmitNext(String.format("User %s: %s", clientId, payload));
+            broadcaster.broadcast(String.format("User %s: %s", clientId, payload));
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Error processing message", e);
             handleError(e, clientId);
         }
     }
 
-    private void handleDisconnect(String clientId) {
-        logger.info(String.format("Client disconnected: %s", clientId));
-        sessions.remove(clientId);
-        broadcaster.tryEmitNext(String.format("User %s left the server", clientId));
-    }
-
     private void handleError(Throwable error, String clientId) {
         logger.log(Level.SEVERE, String.format("Error for client %s", clientId), error);
-        
-        WSSession wsSession = sessions.get(clientId);
-        if (wsSession != null && wsSession.getSession().closeStatus() == null) {
-            WebSocketSession session = wsSession.getSession();
-            String errorMessage = String.format("Error occurred: %s", error.getMessage());
-            session.send(Mono.just(session.textMessage(errorMessage)))
-                .subscribe();
-        }
-
-        sessions.remove(clientId);
+        sessionManager.handleErrorForClient(clientId, error);
     }
 
-    // Public methods to interact with WebSocket sessions
+    private void handleDisconnection(String clientId) {
+        logger.info(String.format("Client disconnected: %s", clientId));
+        sessionManager.removeSession(clientId);
+        broadcaster.announceDisconnection(clientId);
+    }
 
+    // Public API
     public void broadcastMessage(String message) {
-        broadcaster.tryEmitNext(message);
+        broadcaster.broadcast(message);
     }
 
     public void sendMessageToClient(String clientId, String message) {
-        WSSession wsSession = sessions.get(clientId);
-        if (wsSession != null && wsSession.getSession().closeStatus() == null) {
-            WebSocketSession session = wsSession.getSession();
-            session.send(Mono.just(session.textMessage(message)))
-                .subscribe();
-        }
+        sessionManager.sendMessageToClient(clientId, message);
     }
 
-    public void sendMessageToModuleChannelTarget(String module, String channel, String target, String message) {
-        sessions.values().stream()
-            .filter(wsSession -> wsSession.getModule().equals(module)
-                    && wsSession.getChannel().equals(channel) && wsSession.getTarget().equals(target))
-            .forEach(wsSession -> {
-                WebSocketSession session = wsSession.getSession();
-                session.send(Mono.just(session.textMessage(message)))
-                    .subscribe();
-            });
+    public void sendMessageToModuleChannelTarget(String module, String channel, String target, String owner, String message) {
+        sessionManager.sendMessageToModuleChannelTarget(module, channel, target, owner, message);
     }
 
     public boolean isClientConnected(String clientId) {
-        WSSession wsSession = sessions.get(clientId);
-        return wsSession != null && wsSession.getSession().closeStatus() == null;
+        return sessionManager.isClientConnected(clientId);
     }
 
     public int getConnectedClientsCount() {
-        return sessions.size();
+        return sessionManager.getConnectedClientsCount();
     }
 
-    @Data
-    @AllArgsConstructor
-    @Builder
-    public static class WSSession {
-        private final String clientId;
-        private final WebSocketSession session;
-        private final String module;
-        private final String channel;
-        private final String target;
-        private final Map<String, String> params;
+    private void logNewConnection(WSSession session) {
+        logger.info(String.format("New WebSocket session - Client ID: %s, Module: %s, Channel: %s, Target: %s, Owner: %s, Params: %s",
+                session.getClientId(), session.getModule(), session.getChannel(), 
+                session.getTarget(), session.getOwner(), session.getParams()));
     }
 }
