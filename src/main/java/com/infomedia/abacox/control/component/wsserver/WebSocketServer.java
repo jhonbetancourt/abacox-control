@@ -2,6 +2,7 @@ package com.infomedia.abacox.control.component.wsserver;
 
 import com.infomedia.abacox.control.service.AuthService;
 import lombok.*;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.HandlerMapping;
@@ -14,13 +15,11 @@ import reactor.core.publisher.Mono;
 
 import java.util.Collections;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 @Configuration
 @RequiredArgsConstructor
+@Log4j2
 public class WebSocketServer implements WebSocketHandler {
-    private static final Logger logger = Logger.getLogger(WebSocketServer.class.getName());
     private static final String WS_PATH = "/control/websocket/{module}/{channel}/{target}";
     
     private final SessionManager sessionManager;
@@ -86,21 +85,32 @@ public class WebSocketServer implements WebSocketHandler {
     private void handleIncomingMessage(WebSocketMessage message, String clientId) {
         try {
             String payload = message.getPayloadAsText();
-            logger.info(String.format("Received message from %s: %s", clientId, payload));
-            broadcaster.broadcast(String.format("User %s: %s", clientId, payload));
+            log.info("Received message from {}: {}", clientId, payload);
+            if(payload.equals("ping")) {
+                handlePingMessage(clientId);
+            }
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Error processing message", e);
+            log.error("Error processing message", e);
+            handleError(e, clientId);
+        }
+    }
+
+    private void handlePingMessage(String clientId) {
+        try {
+            sessionManager.sendMessageToClient(clientId, "pong");
+        } catch (Exception e) {
+            log.error("Error processing message", e);
             handleError(e, clientId);
         }
     }
 
     private void handleError(Throwable error, String clientId) {
-        logger.log(Level.SEVERE, String.format("Error for client %s", clientId), error);
+        log.error("Error for client {}: {}", clientId, error.getMessage(), error);
         sessionManager.handleErrorForClient(clientId, error);
     }
 
     private void handleDisconnection(String clientId) {
-        logger.info(String.format("Client disconnected: %s", clientId));
+        log.info("Client disconnected: {}", clientId);
         sessionManager.removeSession(clientId);
         broadcaster.announceDisconnection(clientId);
     }
@@ -127,8 +137,8 @@ public class WebSocketServer implements WebSocketHandler {
     }
 
     private void logNewConnection(WSSession session) {
-        logger.info(String.format("New WebSocket session - Client ID: %s, Module: %s, Channel: %s, Target: %s, Owner: %s, Params: %s",
+        log.info("New WebSocket session - Client ID: {}, Module: {}, Channel: {}, Target: {}, Owner: {}, Params: {}",
                 session.getClientId(), session.getModule(), session.getChannel(), 
-                session.getTarget(), session.getOwner(), session.getParams()));
+                session.getTarget(), session.getOwner(), session.getParams());
     }
 }

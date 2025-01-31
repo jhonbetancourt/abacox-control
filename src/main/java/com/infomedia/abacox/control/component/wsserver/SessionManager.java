@@ -21,7 +21,7 @@ public class SessionManager {
 
     public void handleErrorForClient(String clientId, Throwable error) {
         WSSession wsSession = sessions.get(clientId);
-        if (wsSession != null && wsSession.getSession().closeStatus() == null) {
+        if (wsSession != null && wsSession.getSession().isOpen()) {
             WebSocketSession session = wsSession.getSession();
             String errorMessage = String.format("Error occurred: %s", error.getMessage());
             session.send(Mono.just(session.textMessage(errorMessage)))
@@ -32,7 +32,7 @@ public class SessionManager {
 
     public void sendMessageToClient(String clientId, String message) {
         WSSession wsSession = sessions.get(clientId);
-        if (wsSession != null && wsSession.getSession().closeStatus() == null) {
+        if (wsSession != null && wsSession.getSession().isOpen()) {
             WebSocketSession session = wsSession.getSession();
             session.send(Mono.just(session.textMessage(message)))
                     .subscribe();
@@ -54,7 +54,7 @@ public class SessionManager {
 
     public boolean isClientConnected(String clientId) {
         WSSession wsSession = sessions.get(clientId);
-        return wsSession != null && wsSession.getSession().closeStatus() == null;
+        return wsSession != null && wsSession.getSession().isOpen();
     }
 
     public int getConnectedClientsCount() {
