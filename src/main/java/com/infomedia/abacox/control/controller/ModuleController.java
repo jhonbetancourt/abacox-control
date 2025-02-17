@@ -5,8 +5,10 @@ import com.infomedia.abacox.control.component.springfilter.boot.Filter;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
 import com.infomedia.abacox.control.dto.module.ModuleConnectedDto;
 import com.infomedia.abacox.control.dto.module.ModuleDto;
+import com.infomedia.abacox.control.dto.module.ModuleEndpointDto;
 import com.infomedia.abacox.control.dto.superclass.ActivationDto;
 import com.infomedia.abacox.control.entity.Module;
+import com.infomedia.abacox.control.entity.ModuleEndpoint;
 import com.infomedia.abacox.control.service.ModuleService;
 
 import io.swagger.v3.oas.annotations.Parameter;
@@ -69,5 +71,13 @@ public class ModuleController {
             , @RequestParam(required = false) String filter, @RequestParam(required = false) Integer page
             , @RequestParam(required = false) Integer size, @RequestParam(required = false) String sort) {
         return modelConverter.mapPage(moduleService.find(spec, pageable), ModuleDto.class);
+    }
+
+    @GetMapping(value = "endpoint", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Page<ModuleEndpointDto> findEndpoint(@Parameter(hidden = true) @Filter Specification<ModuleEndpoint> spec
+            , @Parameter(hidden = true) Pageable pageable
+            , @RequestParam(required = false) String filter, @RequestParam(required = false) Integer page
+            , @RequestParam(required = false) Integer size, @RequestParam(required = false) String sort) {
+        return modelConverter.mapPage(moduleService.findEndpoint(spec, pageable), ModuleEndpointDto.class);
     }
 }

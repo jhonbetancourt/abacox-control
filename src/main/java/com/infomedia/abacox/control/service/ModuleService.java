@@ -4,16 +4,21 @@ import com.infomedia.abacox.control.component.events.EventsWebSocketClient;
 import com.infomedia.abacox.control.constants.ModuleType;
 import com.infomedia.abacox.control.dto.gateway.RouteDefinition;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
+import com.infomedia.abacox.control.dto.module.ModuleDto;
 import com.infomedia.abacox.control.dto.moduleext.MEndpointInfo;
 import com.infomedia.abacox.control.dto.moduleext.ModuleInfo;
 import com.infomedia.abacox.control.entity.Module;
 import com.infomedia.abacox.control.entity.ModuleEndpoint;
 import com.infomedia.abacox.control.exception.ResourceNotFoundException;
+import com.infomedia.abacox.control.repository.ModuleEndpointRepository;
 import com.infomedia.abacox.control.repository.ModuleRepository;
 import com.infomedia.abacox.control.service.common.CrudService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.stereotype.Service;
@@ -44,12 +49,14 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     private final ApplicationContext applicationContext;
     private RestClient restClient;
     private final EventsWebSocketClient eventsWebSocketClient;
+    private final ModuleEndpointRepository moduleEndpointRepository;
     public ModuleService(ModuleRepository repository, GatewayService gatewayService, ApplicationContext applicationContext
-            , EventsWebSocketClient eventsWebSocketClient) {
+            , EventsWebSocketClient eventsWebSocketClient, ModuleEndpointRepository moduleEndpointRepository) {
         super(repository);
         this.gatewayService = gatewayService;
         this.applicationContext = applicationContext;
         this.eventsWebSocketClient = eventsWebSocketClient;
+        this.moduleEndpointRepository = moduleEndpointRepository;
         restClient = RestClient.builder().build();
     }
 
@@ -356,5 +363,9 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 .prefix(module.getPrefix())
                 .url(module.getUrl())
                 .build();
+    }
+
+    public Page<ModuleEndpoint> findEndpoint(Specification<ModuleEndpoint> spec, Pageable pageable) {
+        return moduleEndpointRepository.findAll(spec, pageable);
     }
 }

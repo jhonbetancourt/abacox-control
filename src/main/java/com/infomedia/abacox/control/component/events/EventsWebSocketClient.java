@@ -97,11 +97,17 @@ public class EventsWebSocketClient {
                     .doOnNext(message -> handleTextMessage(moduleSession, message))
                     .doOnComplete(() -> {
                         log.info("WebSocket session {} completed", sessionId);
-                        scheduleReconnect(sessionId);
+                        // Only attempt reconnect if the session still exists in moduleSessions
+                        if (moduleSessions.containsKey(sessionId)) {
+                            scheduleReconnect(sessionId);
+                        }
                     })
                     .doOnError(error -> {
                         log.error("Error in WebSocket session {}: {}", sessionId, error.getMessage());
-                        scheduleReconnect(sessionId);
+                        // Only attempt reconnect if the session still exists in moduleSessions
+                        if (moduleSessions.containsKey(sessionId)) {
+                            scheduleReconnect(sessionId);
+                        }
                     })
                     .then();
         };
@@ -255,13 +261,12 @@ public class EventsWebSocketClient {
     }
 
     public void disconnect(UUID sessionId) {
-        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
+        ModuleWebSocketSession moduleSession = moduleSessions.remove(sessionId);
         if (moduleSession != null && moduleSession.getSession() != null) {
-            moduleSessions.remove(sessionId);
             reconnectAttempts.remove(sessionId);
             moduleSession.getSession().close()
                     .doOnSuccess(ignored -> log.info("WebSocket session {} disconnected", sessionId))
-                    .doOnError(error -> log.error("Error disconnecting WebSocket session {}: {}", 
+                    .doOnError(error -> log.error("Error disconnecting WebSocket session {}: {}",
                             sessionId, error.getMessage()))
                     .subscribe();
         }
