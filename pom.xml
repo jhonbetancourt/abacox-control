@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.infomedia.abacox</groupId>
 	<artifactId>control</artifactId>
-	<version>1.0</version>
+	<version>1.0.0</version>
 	<name>control</name>
 	<description>Modulo de control de Abacox</description>
 	<url/>

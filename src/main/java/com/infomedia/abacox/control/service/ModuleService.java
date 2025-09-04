@@ -19,10 +19,12 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.server.PathContainer;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -44,12 +46,12 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     private static final String CONTROL_MODULE_PREFIX = "control";
     private static final String CONTROL_MODULE_URL = "N/A";
 
-
     private final GatewayService gatewayService;
     private final ApplicationContext applicationContext;
     private RestClient restClient;
     private final EventsWebSocketClient eventsWebSocketClient;
     private final ModuleEndpointRepository moduleEndpointRepository;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
     public ModuleService(ModuleRepository repository, GatewayService gatewayService, ApplicationContext applicationContext
             , EventsWebSocketClient eventsWebSocketClient, ModuleEndpointRepository moduleEndpointRepository) {
         super(repository);
@@ -232,6 +234,7 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         module.getEndpoints().removeIf(e -> endpoints.stream()
                 .noneMatch(ei -> ei.getPath().equals(e.getPath())&&ei.getMethod().equals(e.getMethod())));
 
+        log.info(endpoints.toString());
         //update existing endpoints and add new ones
         endpoints.forEach(ei -> {
             ModuleEndpoint endpoint = finalModule.getEndpoints().stream()
@@ -281,11 +284,14 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         return new String[] {"/v3/api-docs/**"
                 , "/swagger-ui/**"
                 , "/swagger-ui.html"
+                , "/v3/api-docs.yaml"
+                , "/api/health/**"
                 , "/error"};
     }
 
     public boolean isPublicPath(String path) {
-        return Arrays.asList(publicPaths()).contains(path);
+        return Arrays.stream(publicPaths())
+                .anyMatch(pattern -> pathMatcher.match(pattern, path));
     }
 
     public List<MEndpointInfo> getEnpoints() {

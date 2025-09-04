@@ -1,0 +1,1 @@
+docker build -t abacox-control:1.0.0 .

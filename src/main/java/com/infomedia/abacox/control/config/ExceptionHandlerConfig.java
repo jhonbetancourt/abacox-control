@@ -107,7 +107,7 @@ public class ExceptionHandlerConfig extends AbstractErrorWebExceptionHandler {
     private Mono<ServerResponse> renderErrorResponse(ServerRequest request) {
         Throwable error = getError(request);
         Throwable rootError = NestedExceptionUtils.getRootCause(error);
-        log.error(error);
+        log.error("Handling Exception", error);
 
         // First, try to find a handler for the original error
         Function<ErrorInfo, Mono<ServerResponse>> handler = exceptionHandlers.get(error.getClass());
@@ -130,7 +130,6 @@ public class ExceptionHandlerConfig extends AbstractErrorWebExceptionHandler {
     }
 
     private Mono<ServerResponse> handleDefaultError(ErrorInfo errorInfo) {
-        log.error("Unhandled exception", errorInfo.getError());
         return createErrorResponse(errorInfo.getPath(), HttpStatus.INTERNAL_SERVER_ERROR
                 , "Internal Server Error", "internal-error", "An unexpected error occurred");
     }

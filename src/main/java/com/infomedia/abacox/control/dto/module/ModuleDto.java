@@ -23,4 +23,5 @@ public class ModuleDto extends ActivableDto {
     private String description;
     private ModuleType type;
     private String version;
+    private String url;
 }

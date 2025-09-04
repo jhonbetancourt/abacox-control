@@ -13,6 +13,7 @@ import com.infomedia.abacox.control.service.ModuleService;
 
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,13 +21,18 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 @RequiredArgsConstructor
 @RestController
-@SecurityRequirement(name = "JWT_Token")
+@SecurityRequirements({
+        @SecurityRequirement(name = "JWT_Token"),
+        @SecurityRequirement(name = "Internal_Api_Key")
+})
 @Tag(name = "Module", description = "Module controller")
 @RequestMapping("/control/api/module")
 public class ModuleController {

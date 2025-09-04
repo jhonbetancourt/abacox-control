@@ -1,6 +1,5 @@
 package com.infomedia.abacox.control.config;
 
-import com.infomedia.abacox.control.constants.ModuleType;
 import com.infomedia.abacox.control.service.ModuleService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +18,6 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 import com.infomedia.abacox.control.entity.Module;
 
-import java.util.Base64;
 import java.util.concurrent.ExecutionException;
 
 @Log4j2
@@ -27,6 +25,7 @@ import java.util.concurrent.ExecutionException;
 public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
     private final ModuleService moduleService;
+    private final String internalApiKey;
     private final ObjectMapper objectMapper;
 
     private static final String VALIDATE_ACCESS_TOKEN_PATH = "/api/auth/validateAccessToken";
@@ -92,23 +91,21 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         boolean secured;
-        if(!moduleService.moduleExistsByTypeAndActive(ModuleType.USERS)) {
-            secured = false;
-        }else{
-            ServerWebExchangeMatcher securedPathsMatcher = moduleService.getSecuredPathsMatcher();
-            try {
-                secured = securedPathsMatcher.matches(exchange).toFuture().get().isMatch();
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            } catch (ExecutionException e) {
-                throw new RuntimeException(e);
-            }
+        ServerWebExchangeMatcher securedPathsMatcher = moduleService.getSecuredPathsMatcher();
+        try {
+            secured = securedPathsMatcher.matches(exchange).toFuture().get().isMatch();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
         }
+
         log.info("Method: " + exchange.getRequest().getMethod().name()+" Path: "
                 + exchange.getRequest().getPath().value() + " Secured: " + secured);
 
         String token = extractAccessToken(exchange);
         String queryToken = extractDownloadToken(exchange);
+        String internalKey = extractInternalApiKey(exchange);
         String username = "anonymousUser";
         JsonNode userJson = null;
 
@@ -124,6 +121,9 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
             }
+        } else if (internalApiKey != null && internalApiKey.equals(internalKey)) {
+            log.info("Internal API key matched");
+            username = "admin";
         }
 
         if (username.equals("anonymousUser")&&!secured || !username.equals("anonymousUser")&&secured) {
@@ -149,6 +149,10 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             return bearerToken.substring(7);
         }
         return null;
+    }
+
+    private String extractInternalApiKey(ServerWebExchange exchange) {
+        return exchange.getRequest().getHeaders().getFirst("X-Internal-Api-Key");
     }
 
     private String extractDownloadToken(ServerWebExchange exchange) {
