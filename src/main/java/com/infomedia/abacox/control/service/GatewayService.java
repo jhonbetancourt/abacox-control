@@ -40,9 +40,7 @@ public class GatewayService implements RouteLocator {
                             .route(def.getId(), r -> r.path("/" + def.getPrefix() + def.getPath())
                                     .and()
                                     .method(HttpMethod.valueOf(def.getMethod()))
-                                    .filters(
-                                            f -> f.rewritePath("/" + def.getPrefix() + "(?<segment>.*)", "${segment}")
-                                                    .removeRequestHeader("X-Forwarded-Prefix"))
+                                    .filters(f -> f.rewritePath("/" + def.getPrefix() + "(?<segment>.*)", "${segment}"))
                                     .uri(def.getBaseUrl()))
                             .build()
                             .getRoutes()))
