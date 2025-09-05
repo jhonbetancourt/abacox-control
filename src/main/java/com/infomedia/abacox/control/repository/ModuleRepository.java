@@ -23,5 +23,7 @@ public interface ModuleRepository extends JpaRepository<Module, UUID>, JpaSpecif
 
     Optional<Module> findByPrefixAndActive(String prefix, boolean active);
 
+    List<Module> findByActive(boolean active);
+
 
 }
