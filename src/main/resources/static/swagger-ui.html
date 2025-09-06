@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Swagger UI (Self-Hosted)</title>
+    <link rel="stylesheet" type="text/css" href="swagger-ui/swagger-ui.css" />
+    <link rel="icon" type="image/png" href="swagger-ui/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="swagger-ui/favicon-16x16.png" sizes="16x16" />
+    <style>
+        html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+        *, *:before, *:after { box-sizing: inherit; }
+        body { margin: 0; background: #fafafa; }
+    </style>
+</head>
+
+<body>
+<div id="swagger-ui"></div>
+
+<script src="swagger-ui/swagger-ui-bundle.js" charset="UTF-8"></script>
+<script src="swagger-ui/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+
+<script>
+    window.onload = async function() {
+        const specUrl = 'v3/api-docs';
+        const swaggerContainer = document.getElementById('swagger-ui');
+
+        const observer = new MutationObserver((mutations, obs) => {
+            const downloadWrapper = document.querySelector('.download-url-wrapper');
+            if (downloadWrapper) {
+                console.log('Found and hid the download URL wrapper.');
+                downloadWrapper.style.display = 'none';
+                obs.disconnect();
+            }
+        });
+
+        observer.observe(swaggerContainer, {
+            childList: true,
+            subtree: true
+        });
+        const fullPath = window.location.pathname;
+        const lastSlashIndex = fullPath.lastIndexOf('/');
+        const basePath = fullPath.substring(0, lastSlashIndex);
+        const inferredUrl = window.location.origin + basePath;
+
+        try {
+            const response = await fetch(specUrl);
+            if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+            const spec = await response.json();
+
+            spec.servers = [
+                {
+                    url: inferredUrl,
+                    description: 'Current Environment (Inferred)'
+                }
+            ];
+
+            const ui = SwaggerUIBundle({
+                spec: spec,
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                docExpansion: "none",
+                operationsSorter: "alpha",
+                tagsSorter: "alpha"
+            });
+
+            window.ui = ui;
+
+        } catch (error) {
+            console.error('Failed to load spec for Swagger UI:', error);
+            swaggerContainer.innerHTML = `<div style="color: red; padding: 20px;"><h2>Error Loading API Documentation</h2><p>${error.message}</p></div>`;
+            observer.disconnect();
+        }
+    };
+</script>
+</body>
+</html>
