@@ -267,6 +267,9 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 }
             }
         }
+        if(routes.isEmpty()){
+            return ServerWebExchangeMatchers.pathMatchers("/no-paths-to-secure");
+        }
         return ServerWebExchangeMatchers.pathMatchers(routes.stream()
                 .map(rd -> rd.getPrefix() + rd.getPath())
                 .toArray(String[]::new));
