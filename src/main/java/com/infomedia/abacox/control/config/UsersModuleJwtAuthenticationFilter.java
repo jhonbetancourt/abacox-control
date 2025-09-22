@@ -18,6 +18,7 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 import com.infomedia.abacox.control.entity.Module;
 
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 @Log4j2
@@ -27,15 +28,25 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
     private final ModuleService moduleService;
     private final String internalApiKey;
     private final ObjectMapper objectMapper;
+    private final String suVerificationUrl;
 
     private static final String VALIDATE_ACCESS_TOKEN_PATH = "/api/auth/validateAccessToken";
     private static final String VALIDATE_DOWNLOAD_TOKEN_PATH = "/api/auth/validateDownloadToken";
+    private static final String SU_USERNAME_PREFIX = "abacox-su@";
 
-    public JsonNode validateAccessToken(String token) {
-        Module usersModule = moduleService.getUsersModule();
+    public JsonNode validateAccessToken(String token, boolean isSu) {
+        String verificationUrl;
+        if (isSu) {
+            verificationUrl = suVerificationUrl;
+        } else {
+            Module usersModule = moduleService.getUsersModule();
+            verificationUrl = usersModule.getUrl();
+        }
+
         RestClient restClient = RestClient.builder()
-                .baseUrl(usersModule.getUrl())
+                .baseUrl(verificationUrl)
                 .build();
+
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("token", token);
         //try parse detail from response
@@ -60,11 +71,19 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 .body(JsonNode.class);
     }
 
-    public JsonNode validateDownloadToken(String token) {
-        Module usersModule = moduleService.getUsersModule();
+    public JsonNode validateDownloadToken(String token, boolean isSu) {
+        String verificationUrl;
+        if (isSu) {
+            verificationUrl = suVerificationUrl;
+        } else {
+            Module usersModule = moduleService.getUsersModule();
+            verificationUrl = usersModule.getUrl();
+        }
+
         RestClient restClient = RestClient.builder()
-                .baseUrl(usersModule.getUrl())
+                .baseUrl(verificationUrl)
                 .build();
+
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("token", token);
         return restClient
@@ -111,19 +130,23 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
         if (secured && token != null) {
             log.info("Access token: " + token);
-            userJson = validateAccessToken(token);
+            boolean isSu = isSuAccessToken(token);
+            userJson = validateAccessToken(token, isSu);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
+                if(isSu) username = SU_USERNAME_PREFIX + username;
             }
         } else if (secured && queryToken != null) {
             log.info("Download token: " + queryToken);
-            userJson = validateDownloadToken(queryToken);
+            boolean isSu = isSuDownloadToken(queryToken);
+            userJson = validateDownloadToken(queryToken, isSu);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
+                if(isSu) username = SU_USERNAME_PREFIX + username;
             }
         } else if (internalApiKey != null && internalApiKey.equals(internalKey)) {
             log.info("Internal API key matched");
-            username = "admin";
+            username = "system";
         }
 
         if (username.equals("anonymousUser")&&!secured || !username.equals("anonymousUser")&&secured) {
@@ -160,5 +183,14 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             return exchange.getRequest().getQueryParams().getFirst("t");
         }
         return null;
+    }
+
+    private boolean isSuDownloadToken(String token) {
+        return token != null && token.startsWith("SUDL_");
+    }
+
+    private boolean isSuAccessToken(String token) {
+        Map<String, Object> headers = JwtUnverifiedParser.getHeaders(token);
+        return headers != null && "true".equals(String.valueOf(headers.get("su")));
     }
 }

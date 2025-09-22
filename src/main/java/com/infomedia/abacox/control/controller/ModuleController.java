@@ -54,11 +54,6 @@ public class ModuleController {
         return modelConverter.map(moduleService.changeActivation(id, activationDto.getActive()), ModuleDto.class);
     }
 
-    @PatchMapping(value = "{id}", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ModuleDto update(@PathVariable UUID id) {
-        return modelConverter.map(moduleService.update(id), ModuleDto.class);
-    }
-
     @DeleteMapping("{id}")
     public void delete(@PathVariable UUID id) {
         moduleService.delete(id);

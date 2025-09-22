@@ -25,5 +25,8 @@ public interface ModuleRepository extends JpaRepository<Module, UUID>, JpaSpecif
 
     List<Module> findByActive(boolean active);
 
+    boolean existsByName(String name);
+
+    Optional<Module> findByName(String name);
 
 }

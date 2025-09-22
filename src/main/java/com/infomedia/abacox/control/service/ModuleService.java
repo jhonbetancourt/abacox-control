@@ -62,13 +62,11 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         restClient = RestClient.builder().build();
     }
 
-    public Module buildFromDto(CreateModuleUrl cDto) {
+    public Module buildFromDto(CreateModuleUrl cDto, ModuleInfo moduleInfo) {
 
         RestClient restClient = RestClient.builder()
                 .baseUrl(cDto.getUrl())
                 .build();
-
-        ModuleInfo moduleInfo = getModuleInfo(cDto.getUrl(), restClient);
         List<MEndpointInfo> endpointsInfo = getEndpointsInfo(cDto.getUrl(), restClient);
 
         Module module = Module.builder()
@@ -94,14 +92,11 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         return module;
     }
 
-    @Transactional
-    public Module update(UUID moduleId){
-        Module module = get(moduleId);
+    private Module updateModule(Module module, ModuleInfo moduleInfo){
         if(module.getType().equals(ModuleType.CONTROL)){
             return module;
         }
 
-        ModuleInfo moduleInfo = getModuleInfo(module.getUrl(), restClient);
         List<MEndpointInfo> endpointsInfo = getEndpointsInfo(module.getUrl(), restClient);
 
         module.setName(moduleInfo.getName());
@@ -123,7 +118,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         module.getEndpoints().addAll(endpoints);
         validateModuleType(module);
         save(module);
-        updateGateway();
         return module;
     }
 
@@ -176,7 +170,14 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
 
     @Transactional
     public Module create(CreateModuleUrl cDto) {
-        Module module = save(buildFromDto(cDto));
+        ModuleInfo moduleInfo = getModuleInfo(cDto.getUrl(), restClient);
+        Module module = getRepository().findByName(moduleInfo.getName())
+                .orElse(null);
+        if(module!=null){
+            updateModule(module, moduleInfo);
+        }else{
+            module = save(buildFromDto(cDto, moduleInfo));
+        }
         updateGateway();
         eventsWebSocketClient.connect(module);
         return module;
