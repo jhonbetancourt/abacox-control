@@ -45,7 +45,7 @@ public class WebSocketServer implements WebSocketHandler {
         String clientId = session.getId();
         WebSocketConnection connection = WebSocketConnection.from(session);
         
-        return authService.getUsername()
+        return authService.getUsernameMono()
                 .flatMap(username -> {
                     WSSession wsSession = createSession(clientId, connection, username);
                     sessionManager.addSession(wsSession);
