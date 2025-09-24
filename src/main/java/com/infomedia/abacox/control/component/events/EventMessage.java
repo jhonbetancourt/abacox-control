@@ -3,14 +3,11 @@ package com.infomedia.abacox.control.component.events;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.infomedia.abacox.control.config.JsonConfig;
-import io.swagger.v3.core.util.Json;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-import lombok.experimental.SuperBuilder;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.UUID;
 

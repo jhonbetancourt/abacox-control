@@ -1,6 +1,5 @@
 package com.infomedia.abacox.control.component.events;
 
-import com.infomedia.abacox.control.component.wsserver.WebSocketServer;
 import com.infomedia.abacox.control.entity.Module;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,7 +30,6 @@ public class EventsWebSocketClient {
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
 
-    private final WebSocketServer server;
     private final WebSocketClient client;
     private final Map<UUID, ModuleWebSocketSession> moduleSessions;
     private final Map<UUID, Integer> reconnectAttempts;
@@ -44,8 +42,7 @@ public class EventsWebSocketClient {
     @Value("${spring.application.prefix}")
     private String source;
 
-    public EventsWebSocketClient(WebSocketServer server, ObjectMapper objectMapper) {
-        this.server = server;
+    public EventsWebSocketClient(ObjectMapper objectMapper) {
         this.client = new ReactorNettyWebSocketClient();
         this.moduleSessions = new ConcurrentHashMap<>();
         this.reconnectAttempts = new ConcurrentHashMap<>();
@@ -226,13 +223,6 @@ public class EventsWebSocketClient {
         try {
             WSEventMessage wsEventMessage = objectMapper.readValue(payload, WSEventMessage.class);
             log.info("Received WS Event Message for session {}: {}", moduleSession.getId(), wsEventMessage);
-            server.sendMessageToModuleChannelTarget(
-                    wsEventMessage.getSource(),
-                    wsEventMessage.getChannel(),
-                    wsEventMessage.getTarget(),
-                    wsEventMessage.getOwner(),
-                    objectMapper.writeValueAsString(wsEventMessage)
-            );
         } catch (Exception e) {
             log.error("Error handling WS event message: {}", e.getMessage());
         }

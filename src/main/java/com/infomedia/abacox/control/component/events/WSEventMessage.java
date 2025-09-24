@@ -16,18 +16,16 @@ import java.util.UUID;
 @NoArgsConstructor
 @Data
 public class WSEventMessage extends WSMessage{
-    private String owner;
     private EventType eventType;
     private String channel;
     private String target;
     private JsonNode content;
 
-    public WSEventMessage(String source, EventType eventType, String channel, String target, String content, String owner) {
+    public WSEventMessage(String source, EventType eventType, String channel, String target, String content) {
         super(UUID.randomUUID(), source, LocalDateTime.now(), MessageType.WS_EVENT);
         this.eventType = eventType;
         this.channel = channel;
         this.target = target;
-        this.owner = owner;
         try {
             this.content = JsonConfig.getObjectMapper().readTree(content);
         } catch (JsonProcessingException e) {
