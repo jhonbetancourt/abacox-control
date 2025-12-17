@@ -23,12 +23,18 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 @Component
 @Log4j2
 public class EventsWebSocketClient {
+
     private static final int INITIAL_RECONNECT_DELAY = 1;
     private static final int MAX_RECONNECT_DELAY = 60;
+    
+    // The server sends a PING heartbeat every 30 seconds.
+    // If we don't receive ANY message for 45 seconds, we assume the connection is dead.
+    private static final int READ_TIMEOUT_SECONDS = 45;
 
     private final WebSocketClient client;
     private final Map<UUID, ModuleWebSocketSession> moduleSessions;
@@ -91,17 +97,23 @@ public class EventsWebSocketClient {
             reconnectAttempts.remove(sessionId);
 
             return session.receive()
+                    // Detect half-open connections. Reset timer on every received message (including PING).
+                    .timeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS))
                     .doOnNext(message -> handleTextMessage(moduleSession, message))
                     .doOnComplete(() -> {
-                        log.info("WebSocket session {} completed", sessionId);
-                        // Only attempt reconnect if the session still exists in moduleSessions
+                        log.info("WebSocket session {} completed normally", sessionId);
                         if (moduleSessions.containsKey(sessionId)) {
                             scheduleReconnect(sessionId);
                         }
                     })
                     .doOnError(error -> {
-                        log.error("Error in WebSocket session {}: {}", sessionId, error.getMessage());
-                        // Only attempt reconnect if the session still exists in moduleSessions
+                        if (error instanceof TimeoutException) {
+                            log.warn("WebSocket session {} timed out (no data received for {}s). Reconnecting...", 
+                                    sessionId, READ_TIMEOUT_SECONDS);
+                        } else {
+                            log.error("Error in WebSocket session {}: {}", sessionId, error.getMessage());
+                        }
+                        
                         if (moduleSessions.containsKey(sessionId)) {
                             scheduleReconnect(sessionId);
                         }
@@ -110,107 +122,47 @@ public class EventsWebSocketClient {
         };
     }
 
-    public Mono<EventTypesInfo> getEventTypesInfo(String baseUrl) {
-        return webClient.get()
-                .uri(baseUrl + "/api/module/eventTypes")
-                .retrieve()
-                .onStatus(status -> !status.is2xxSuccessful(),
-                        response -> response.bodyToMono(String.class)
-                                .flatMap(error -> {
-                                    String detail = null;
-                                    try {
-                                        JsonNode errorNode = objectMapper.readTree(error);
-                                        detail = errorNode.get("detail").asText();
-                                    } catch (Exception ignored) {
-                                    }
-                                    return Mono.error(new RuntimeException(
-                                            detail != null ? detail : "Error while getting event types info"));
-                                }))
-                .bodyToMono(EventTypesInfo.class);
-    }
-
-    private void scheduleReconnect(UUID sessionId) {
-        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
-        if (moduleSession == null) return;
-
-        int attempts = reconnectAttempts.getOrDefault(sessionId, 0);
-        int delay = calculateReconnectDelay(attempts);
-        reconnectAttempts.put(sessionId, attempts + 1);
-
-        log.info("Scheduling reconnection for session {} in {} seconds (attempt {})",
-                sessionId, delay, attempts + 1);
-
-        Mono.delay(Duration.ofSeconds(delay))
-                .doOnNext(ignored -> {
-                    log.info("Attempting to reconnect session {}", sessionId);
-                    doConnect(moduleSession);
-                })
-                .subscribe();
-    }
-
-    public void sendMessage(UUID sessionId, WSMessage wsMessage) {
-        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
-        if (!isValidSession(moduleSession)) {
-            log.warn("WebSocket session {} is not open", sessionId);
-            if (moduleSession != null) scheduleReconnect(sessionId);
-            return;
-        }
-
-        try {
-            String jsonMessage = objectMapper.writeValueAsString(wsMessage);
-            moduleSession.getSession()
-                    .send(Mono.just(moduleSession.getSession().textMessage(jsonMessage)))
-                    .doOnSuccess(ignored -> log.info("Sent WSMessage to session {}: {}", sessionId, jsonMessage))
-                    .doOnError(error -> {
-                        log.error("Error sending WSMessage to session {}: {}", sessionId, error.getMessage());
-                        scheduleReconnect(sessionId);
-                    })
-                    .subscribe();
-        } catch (Exception e) {
-            log.error("Error preparing WSMessage for session {}: {}", sessionId, e.getMessage());
-        }
-    }
-
-    public void sendEventMessageAll(EventMessage eventMessage) {
-        moduleSessions.values().forEach(session -> 
-            sendMessage(session.getId(), eventMessage));
-    }
-
-    public void sendEventMessageAllExcept(UUID sessionId, EventMessage eventMessage) {
-        moduleSessions.values().stream()
-                .filter(session -> !session.getId().equals(sessionId))
-                .forEach(session -> sendMessage(session.getId(), eventMessage));
-    }
-
-    public void sendEventMessageAllExceptAndConsumes(UUID sessionId, EventMessage eventMessage) {
-        moduleSessions.values().stream()
-                .filter(session -> !session.getId().equals(sessionId)
-                        && session.getConsumes().contains(eventMessage.getEventType().name()))
-                .forEach(session -> sendMessage(session.getId(), eventMessage));
-    }
-
     private void handleTextMessage(ModuleWebSocketSession moduleSession, WebSocketMessage message) {
-        String payload = message.getPayloadAsText();
-        CompletableFuture.runAsync(() -> processMessage(moduleSession, payload));
+        // Only process Text messages. 
+        // Note: ReactorNettyWebSocketClient handles low-level PING frames automatically (PONGs back),
+        // but does not pass them to .receive(). The "PING" we handle here is the JSON Application-Level Ping.
+        if (message.getType() == WebSocketMessage.Type.TEXT) {
+            String payload = message.getPayloadAsText();
+            CompletableFuture.runAsync(() -> processMessage(moduleSession, payload));
+        }
     }
 
     private void processMessage(ModuleWebSocketSession moduleSession, String payload) {
         try {
+            // 1. Parse generic WSMessage to determine type
             WSMessage wsMessage = objectMapper.readValue(payload, WSMessage.class);
+
+            if (wsMessage.getMessagetype() == null) {
+                log.warn("Received message with missing MessageType: {}", payload);
+                return;
+            }
+
+            // 2. Handle specific types
             switch (wsMessage.getMessagetype()) {
+                case PING -> {
+                    // Do nothing. The act of receiving this message has already reset 
+                    // the .timeout() operator in createWebSocketHandler.
+                    log.trace("Received Heartbeat (PING) from session {}", moduleSession.getId());
+                }
                 case EVENT -> handleEventMessage(moduleSession, payload);
                 case WS_EVENT -> handleWSEventMessage(moduleSession, payload);
                 case COMMAND_REQUEST -> handleCommandRequestMessage(moduleSession, payload);
+                default -> log.debug("Received unhandled message type: {}", wsMessage.getMessagetype());
             }
         } catch (Exception e) {
-            log.error("Error processing message: " + e.getMessage(), e);
+            log.error("Error processing message payload: " + e.getMessage(), e);
         }
     }
 
     private void handleEventMessage(ModuleWebSocketSession moduleSession, String payload) {
         try {
             EventMessage eventMessage = objectMapper.readValue(payload, EventMessage.class);
-            log.info("Received Event Message for session {}: {}", moduleSession.getId(), eventMessage);
+            log.debug("Received Event Message for session {}: {}", moduleSession.getId(), eventMessage);
             if (moduleSession.getProduces().contains(eventMessage.getEventType().name())) {
                 sendEventMessageAllExceptAndConsumes(moduleSession.getId(), eventMessage);
             }
@@ -248,6 +200,85 @@ public class EventsWebSocketClient {
         } catch (Exception e) {
             log.error("Error handling command request message: {}", e.getMessage());
         }
+    }
+
+    public void sendMessage(UUID sessionId, WSMessage wsMessage) {
+        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
+        if (!isValidSession(moduleSession)) {
+            log.warn("WebSocket session {} is not open. Cannot send message.", sessionId);
+            if (moduleSession != null) scheduleReconnect(sessionId);
+            return;
+        }
+
+        try {
+            String jsonMessage = objectMapper.writeValueAsString(wsMessage);
+            moduleSession.getSession()
+                    .send(Mono.just(moduleSession.getSession().textMessage(jsonMessage)))
+                    .doOnSuccess(ignored -> log.debug("Sent WSMessage to session {}: {}", sessionId, jsonMessage))
+                    .doOnError(error -> {
+                        log.error("Error sending WSMessage to session {}: {}", sessionId, error.getMessage());
+                        scheduleReconnect(sessionId);
+                    })
+                    .subscribe();
+        } catch (Exception e) {
+            log.error("Error preparing WSMessage for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    public void sendEventMessageAll(EventMessage eventMessage) {
+        moduleSessions.values().forEach(session -> 
+            sendMessage(session.getId(), eventMessage));
+    }
+
+    public void sendEventMessageAllExcept(UUID sessionId, EventMessage eventMessage) {
+        moduleSessions.values().stream()
+                .filter(session -> !session.getId().equals(sessionId))
+                .forEach(session -> sendMessage(session.getId(), eventMessage));
+    }
+
+    public void sendEventMessageAllExceptAndConsumes(UUID sessionId, EventMessage eventMessage) {
+        moduleSessions.values().stream()
+                .filter(session -> !session.getId().equals(sessionId)
+                        && session.getConsumes().contains(eventMessage.getEventType().name()))
+                .forEach(session -> sendMessage(session.getId(), eventMessage));
+    }
+
+    public Mono<EventTypesInfo> getEventTypesInfo(String baseUrl) {
+        return webClient.get()
+                .uri(baseUrl + "/api/module/eventTypes")
+                .retrieve()
+                .onStatus(status -> !status.is2xxSuccessful(),
+                        response -> response.bodyToMono(String.class)
+                                .flatMap(error -> {
+                                    String detail = null;
+                                    try {
+                                        JsonNode errorNode = objectMapper.readTree(error);
+                                        detail = errorNode.get("detail").asText();
+                                    } catch (Exception ignored) {
+                                    }
+                                    return Mono.error(new RuntimeException(
+                                            detail != null ? detail : "Error while getting event types info"));
+                                }))
+                .bodyToMono(EventTypesInfo.class);
+    }
+
+    private void scheduleReconnect(UUID sessionId) {
+        ModuleWebSocketSession moduleSession = moduleSessions.get(sessionId);
+        if (moduleSession == null) return; // Session was explicitly disconnected
+
+        int attempts = reconnectAttempts.getOrDefault(sessionId, 0);
+        int delay = calculateReconnectDelay(attempts);
+        reconnectAttempts.put(sessionId, attempts + 1);
+
+        log.info("Scheduling reconnection for session {} in {} seconds (attempt {})",
+                sessionId, delay, attempts + 1);
+
+        Mono.delay(Duration.ofSeconds(delay))
+                .doOnNext(ignored -> {
+                    log.info("Attempting to reconnect session {}", sessionId);
+                    doConnect(moduleSession);
+                })
+                .subscribe();
     }
 
     public void disconnect(UUID sessionId) {
