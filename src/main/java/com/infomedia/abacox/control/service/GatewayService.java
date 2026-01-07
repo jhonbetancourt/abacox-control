@@ -3,15 +3,14 @@ package com.infomedia.abacox.control.service;
 import com.infomedia.abacox.control.dto.gateway.RouteDefinition;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
 import org.springframework.cloud.gateway.route.Route;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -40,15 +39,36 @@ public class GatewayService implements RouteLocator {
         try {
             newRoutes = Flux.fromIterable(definitions)
                     .flatMap(def -> {
-                        String fullPath = "/" + def.getPrefix() + def.getPath();
-                        String prefixToStrip = "/" + def.getPrefix();
-                        String rewriteRegex = prefixToStrip + "(?<segment>.*)";
+                        // FIX: Use a unique variable name '{gatewayTenantId}' to avoid collision
+                        // if the downstream 'def.getPath()' also contains a {tenantId} variable.
+                        String matchPath = "/service/{gatewayTenantId}/" + def.getPrefix() + def.getPath();
+
+                        // Regex to strip the prefix. Matches: /service/any-id/prefix/segment
+                        String rewriteRegex = "/service/(?<gTId>[^/]+)/" + def.getPrefix() + "(?<segment>.*)";
 
                         return Mono.just(builder.routes()
-                                .route(def.getId(), r -> r.path(fullPath)
+                                .route(def.getId(), r -> r.path(matchPath)
                                         .and()
                                         .method(HttpMethod.valueOf(def.getMethod()))
-                                        .filters(f -> f.rewritePath(rewriteRegex, "${segment}"))
+                                        .filters(f -> f
+                                                // 1. Extract tenantId from URL and add X-Tenant-Id Header
+                                                .filter((exchange, chain) -> {
+                                                    String path = exchange.getRequest().getURI().getPath();
+                                                    // Path structure: /service/{tenantId}/{prefix}/...
+                                                    // Split: ["", "service", "tenantId", ...]
+                                                    String[] parts = path.split("/");
+                                                    if (parts.length > 2 && "service".equals(parts[1])) {
+                                                        String tenantId = parts[2];
+                                                        ServerHttpRequest request = exchange.getRequest().mutate()
+                                                                .header("X-Tenant-Id", tenantId)
+                                                                .build();
+                                                        return chain.filter(exchange.mutate().request(request).build());
+                                                    }
+                                                    return chain.filter(exchange);
+                                                })
+                                                // 2. Rewrite path: Keep only the ${segment}
+                                                .rewritePath(rewriteRegex, "${segment}")
+                                        )
                                         .uri(def.getBaseUrl()))
                                 .build()
                                 .getRoutes());
@@ -60,14 +80,12 @@ public class GatewayService implements RouteLocator {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Route update was interrupted", e);
         } catch (ExecutionException e) {
-            // It's often more useful to throw the underlying cause
             throw new RuntimeException("Failed to update routes", e.getCause());
         }
 
         routes.set(newRoutes);
-
-        // Publish event to refresh routes
         eventPublisher.publishEvent(new RefreshRoutesEvent(this));
-        newRoutes.forEach(route -> log.info("Loaded Route: {}", route));
+
+        log.info("Gateway routes updated. Total count: {}", newRoutes.size());
     }
 }

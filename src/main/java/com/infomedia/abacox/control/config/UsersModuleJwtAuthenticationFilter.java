@@ -36,7 +36,8 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
     private static final String VALIDATE_DOWNLOAD_TOKEN_PATH = "/api/auth/validateDownloadToken";
     private static final String SU_USERNAME_PREFIX = "abacox-su@";
 
-    public JsonNode validateAccessToken(String token, boolean isSu) {
+    // MODIFIED: Added tenantId parameter
+    public JsonNode validateAccessToken(String token, boolean isSu, String tenantId) {
         String verificationUrl;
         if (isSu) {
             verificationUrl = suVerificationUrl;
@@ -45,19 +46,23 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             verificationUrl = usersModule.getUrl();
         }
 
-        RestClient restClient = RestClient.builder()
-                .baseUrl(verificationUrl)
-                .build();
+        RestClient.Builder restClientBuilder = RestClient.builder()
+                .baseUrl(verificationUrl);
+
+        // MODIFIED: Add X-Tenant-Id header if present
+        if (tenantId != null && !tenantId.isEmpty()) {
+            restClientBuilder.defaultHeader("X-Tenant-Id", tenantId);
+        }
+
+        RestClient restClient = restClientBuilder.build();
 
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("token", token);
-        //try parse detail from response
         return restClient
                 .post().uri(VALIDATE_ACCESS_TOKEN_PATH)
                 .body(requestBody)
                 .retrieve()
                 .onStatus(s -> !s.is2xxSuccessful(), (req, res) -> {
-                    //try parse detail from response
                     String detail = null;
                     try {
                         JsonNode errorNode = new ObjectMapper().readTree(res.getBody());
@@ -73,7 +78,8 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 .body(JsonNode.class);
     }
 
-    public JsonNode validateDownloadToken(String token, boolean isSu) {
+    // MODIFIED: Added tenantId parameter
+    public JsonNode validateDownloadToken(String token, boolean isSu, String tenantId) {
         String verificationUrl;
         if (isSu) {
             verificationUrl = suVerificationUrl;
@@ -82,9 +88,15 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             verificationUrl = usersModule.getUrl();
         }
 
-        RestClient restClient = RestClient.builder()
-                .baseUrl(verificationUrl)
-                .build();
+        RestClient.Builder restClientBuilder = RestClient.builder()
+                .baseUrl(verificationUrl);
+
+        // MODIFIED: Add X-Tenant-Id header if present
+        if (tenantId != null && !tenantId.isEmpty()) {
+            restClientBuilder.defaultHeader("X-Tenant-Id", tenantId);
+        }
+
+        RestClient restClient = restClientBuilder.build();
 
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("token", token);
@@ -93,7 +105,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 .body(requestBody)
                 .retrieve()
                 .onStatus(s -> !s.is2xxSuccessful(), (req, res) -> {
-                    //try parse details from response
                     String detail = null;
                     try {
                         JsonNode errorNode = new ObjectMapper().readTree(res.getBody());
@@ -115,14 +126,12 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         ServerWebExchangeMatcher securedPathsMatcher = moduleService.getSecuredPathsMatcher();
         try {
             secured = securedPathsMatcher.matches(exchange).toFuture().get().isMatch();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
+        } catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException(e);
         }
 
-        log.info("Method: " + exchange.getRequest().getMethod().name()+" Path: "
-                + exchange.getRequest().getPath().value() + " Secured: " + secured);
+        log.info("Method: {} Path: {} Secured: {}", 
+            exchange.getRequest().getMethod().name(), exchange.getRequest().getPath().value(), secured);
 
         String token = extractAccessToken(exchange);
         String queryToken = extractDownloadToken(exchange);
@@ -130,10 +139,21 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         String username = "anonymousUser";
         JsonNode userJson = null;
 
+        // MODIFIED: Extract tenantId from path
+        String tenantId = null;
+        String path = exchange.getRequest().getPath().value();
+        String[] pathParts = path.split("/");
+        // Path structure: /service/{tenantId}/... => parts: ["", "service", "tenantId", ...]
+        if (pathParts.length > 2 && "service".equals(pathParts[1])) {
+            tenantId = pathParts[2];
+            log.info("Tenant context identified: {}", tenantId);
+        }
+
         if (secured && token != null) {
-            log.info("Access token: " + token);
+            log.info("Access token: " + token.substring(0, Math.min(token.length(), 15)) + "...");
             boolean isSu = isSuAccessToken(token);
-            userJson = validateAccessToken(token, isSu);
+            // MODIFIED: Pass tenantId to validation method
+            userJson = validateAccessToken(token, isSu, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
                 if(isSu) username = SU_USERNAME_PREFIX + username;
@@ -141,7 +161,8 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         } else if (secured && queryToken != null) {
             log.info("Download token: " + queryToken);
             boolean isSu = isSuDownloadToken(queryToken);
-            userJson = validateDownloadToken(queryToken, isSu);
+            // MODIFIED: Pass tenantId to validation method
+            userJson = validateDownloadToken(queryToken, isSu, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
                 if(isSu) username = SU_USERNAME_PREFIX + username;
@@ -153,7 +174,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
         if (username.equals("anonymousUser")&&!secured || !username.equals("anonymousUser")&&secured) {
             log.info("Authenticated user: " + username);
-            //add to headers
             if(userJson != null){
                 exchange.getRequest().mutate()
                         .header("X-Username", username)
@@ -162,9 +182,7 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(username, null, null);
             SecurityContext context = SecurityContextHolder.createEmptyContext();
-            UsernamePasswordAuthenticationToken authToken
-                    = new UsernamePasswordAuthenticationToken(username, null, null);
-            context.setAuthentication(authToken);
+            context.setAuthentication(auth);
             SecurityContextHolder.setContext(context);
             return chain.filter(exchange)
                     .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth));
@@ -172,6 +190,8 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
         return chain.filter(exchange);
     }
+    
+    // ... rest of the file is unchanged ...
 
     private String extractAccessToken(ServerWebExchange exchange) {
         String bearerToken = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);

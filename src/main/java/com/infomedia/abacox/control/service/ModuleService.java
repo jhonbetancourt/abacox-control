@@ -253,27 +253,41 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     }
 
     public ServerWebExchangeMatcher getSecuredPathsMatcher() {
-        List<RouteDefinition> routes = new ArrayList<>();
+        List<String> patterns = new ArrayList<>();
+
         for (Module module : getAllActive()) {
+            // Determine the path structure based on module type
+            boolean isControlModule = module.getType() == ModuleType.CONTROL;
+
             for (ModuleEndpoint endpoint : module.getEndpoints()) {
                 if (endpoint.isActive() && endpoint.isSecured()) {
-                    RouteDefinition route = RouteDefinition.builder()
-                            .id(endpoint.getId().toString())
-                            .prefix(module.getPrefix())
-                            .method(endpoint.getMethod())
-                            .baseUrl(module.getUrl())
-                            .path(endpoint.getPath())
-                            .build();
-                    routes.add(route);
+                    String fullPath;
+
+                    if (isControlModule) {
+                        // Control module is accessed directly, usually includes its prefix or just path
+                        // Assuming Control module paths stored in DB are absolute (e.g., "/control/api/module")
+                        // If they rely on prefix + path logic:
+                        fullPath = "/" + module.getPrefix() + endpoint.getPath();
+
+                        // Handle double slashes if path already starts with /
+                        fullPath = fullPath.replace("//", "/");
+                    } else {
+                        // Backend modules are accessed via Gateway with Tenant ID
+                        // Pattern: /service/*/{prefix}/{path}
+                        fullPath = "/service/*/" + module.getPrefix() + endpoint.getPath();
+                        fullPath = fullPath.replace("//", "/");
+                    }
+
+                    patterns.add(fullPath);
                 }
             }
         }
-        if(routes.isEmpty()){
+
+        if (patterns.isEmpty()) {
             return ServerWebExchangeMatchers.pathMatchers("/no-paths-to-secure");
         }
-        return ServerWebExchangeMatchers.pathMatchers(routes.stream()
-                .map(rd -> rd.getPrefix() + rd.getPath())
-                .toArray(String[]::new));
+
+        return ServerWebExchangeMatchers.pathMatchers(patterns.toArray(String[]::new));
     }
 
     public boolean moduleExistsByType(ModuleType type) {
