@@ -36,7 +36,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
     private static final String VALIDATE_DOWNLOAD_TOKEN_PATH = "/api/auth/validateDownloadToken";
     private static final String SU_USERNAME_PREFIX = "abacox-su@";
 
-    // MODIFIED: Added tenantId parameter
     public JsonNode validateAccessToken(String token, boolean isSu, String tenantId) {
         String verificationUrl;
         if (isSu) {
@@ -49,7 +48,7 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         RestClient.Builder restClientBuilder = RestClient.builder()
                 .baseUrl(verificationUrl);
 
-        // MODIFIED: Add X-Tenant-Id header if present
+        // Add X-Tenant-Id header if present
         if (tenantId != null && !tenantId.isEmpty()) {
             restClientBuilder.defaultHeader("X-Tenant-Id", tenantId);
         }
@@ -78,7 +77,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 .body(JsonNode.class);
     }
 
-    // MODIFIED: Added tenantId parameter
     public JsonNode validateDownloadToken(String token, boolean isSu, String tenantId) {
         String verificationUrl;
         if (isSu) {
@@ -91,7 +89,7 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         RestClient.Builder restClientBuilder = RestClient.builder()
                 .baseUrl(verificationUrl);
 
-        // MODIFIED: Add X-Tenant-Id header if present
+        // Add X-Tenant-Id header if present
         if (tenantId != null && !tenantId.isEmpty()) {
             restClientBuilder.defaultHeader("X-Tenant-Id", tenantId);
         }
@@ -127,10 +125,11 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         try {
             secured = securedPathsMatcher.matches(exchange).toFuture().get().isMatch();
         } catch (InterruptedException | ExecutionException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
 
-        log.info("Method: {} Path: {} Secured: {}", 
+        log.info("Method: {} Path: {} Secured: {}",
             exchange.getRequest().getMethod().name(), exchange.getRequest().getPath().value(), secured);
 
         String token = extractAccessToken(exchange);
@@ -139,20 +138,25 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         String username = "anonymousUser";
         JsonNode userJson = null;
 
-        // MODIFIED: Extract tenantId from path
+        // Extract tenantId from path
         String tenantId = null;
         String path = exchange.getRequest().getPath().value();
         String[] pathParts = path.split("/");
-        // Path structure: /service/{tenantId}/... => parts: ["", "service", "tenantId", ...]
-        if (pathParts.length > 2 && "service".equals(pathParts[1])) {
-            tenantId = pathParts[2];
+
+        // New path structure for proxied services is /{tenantId}/{prefix}/...
+        // e.g., /my-tenant/users/api/me
+        // pathParts would be: ["", "my-tenant", "users", ...]
+        // We need at least 3 parts for a valid proxied path (empty string, tenant, prefix).
+        // We also exclude paths for the control module itself, which start with /control.
+        if (pathParts.length > 2 && !"control".equals(pathParts[1])) {
+            tenantId = pathParts[1];
             log.info("Tenant context identified: {}", tenantId);
         }
 
         if (secured && token != null) {
             log.info("Access token: " + token.substring(0, Math.min(token.length(), 15)) + "...");
             boolean isSu = isSuAccessToken(token);
-            // MODIFIED: Pass tenantId to validation method
+            // Pass tenantId to validation method
             userJson = validateAccessToken(token, isSu, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
@@ -161,7 +165,7 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         } else if (secured && queryToken != null) {
             log.info("Download token: " + queryToken);
             boolean isSu = isSuDownloadToken(queryToken);
-            // MODIFIED: Pass tenantId to validation method
+            // Pass tenantId to validation method
             userJson = validateDownloadToken(queryToken, isSu, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
@@ -190,8 +194,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
 
         return chain.filter(exchange);
     }
-    
-    // ... rest of the file is unchanged ...
 
     private String extractAccessToken(ServerWebExchange exchange) {
         String bearerToken = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
