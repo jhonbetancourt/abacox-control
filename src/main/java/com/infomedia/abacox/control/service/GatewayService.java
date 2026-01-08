@@ -41,10 +41,10 @@ public class GatewayService implements RouteLocator {
                     .flatMap(def -> {
                         // FIX: Use a unique variable name '{gatewayTenantId}' to avoid collision
                         // if the downstream 'def.getPath()' also contains a {tenantId} variable.
-                        String matchPath = "/service/{gatewayTenantId}/" + def.getPrefix() + def.getPath();
+                        String matchPath = "/{gatewayTenantId}/" + def.getPrefix() + def.getPath();
 
-                        // Regex to strip the prefix. Matches: /service/any-id/prefix/segment
-                        String rewriteRegex = "/service/(?<gTId>[^/]+)/" + def.getPrefix() + "(?<segment>.*)";
+                        // Regex to strip the prefix. Matches: /any-id/prefix/segment
+                        String rewriteRegex = "/(?<gTId>[^/]+)/" + def.getPrefix() + "(?<segment>.*)";
 
                         return Mono.just(builder.routes()
                                 .route(def.getId(), r -> r.path(matchPath)
@@ -54,11 +54,11 @@ public class GatewayService implements RouteLocator {
                                                 // 1. Extract tenantId from URL and add X-Tenant-Id Header
                                                 .filter((exchange, chain) -> {
                                                     String path = exchange.getRequest().getURI().getPath();
-                                                    // Path structure: /service/{tenantId}/{prefix}/...
-                                                    // Split: ["", "service", "tenantId", ...]
+                                                    // Path structure: /{tenantId}/{prefix}/...
+                                                    // Split: ["", "tenantId", ...]
                                                     String[] parts = path.split("/");
-                                                    if (parts.length > 2 && "service".equals(parts[1])) {
-                                                        String tenantId = parts[2];
+                                                    if (parts.length > 1) {
+                                                        String tenantId = parts[1];
                                                         ServerHttpRequest request = exchange.getRequest().mutate()
                                                                 .header("X-Tenant-Id", tenantId)
                                                                 .build();

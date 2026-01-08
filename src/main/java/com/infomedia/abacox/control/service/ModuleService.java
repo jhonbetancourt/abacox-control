@@ -273,8 +273,8 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                         fullPath = fullPath.replace("//", "/");
                     } else {
                         // Backend modules are accessed via Gateway with Tenant ID
-                        // Pattern: /service/*/{prefix}/{path}
-                        fullPath = "/service/*/" + module.getPrefix() + endpoint.getPath();
+                        // Pattern: /*/{prefix}/{path}
+                        fullPath = "/*/" + module.getPrefix() + endpoint.getPath();
                         fullPath = fullPath.replace("//", "/");
                     }
 
