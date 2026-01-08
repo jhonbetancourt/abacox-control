@@ -9,6 +9,7 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -27,6 +28,8 @@ public class GatewayService implements RouteLocator {
     private final RouteLocatorBuilder builder;
     private final AtomicReference<List<Route>> routes = new AtomicReference<>(new ArrayList<>());
     private final ApplicationEventPublisher eventPublisher;
+    // Inject the tenant access service
+    private final TenantAccessService tenantAccessService;
 
     @Override
     public Flux<Route> getRoutes() {
@@ -39,11 +42,10 @@ public class GatewayService implements RouteLocator {
         try {
             newRoutes = Flux.fromIterable(definitions)
                     .flatMap(def -> {
-                        // FIX: Use a unique variable name '{gatewayTenantId}' to avoid collision
-                        // if the downstream 'def.getPath()' also contains a {tenantId} variable.
+                        // The path pattern the gateway listens to
                         String matchPath = "/{gatewayTenantId}/" + def.getPrefix() + def.getPath();
 
-                        // Regex to strip the prefix. Matches: /any-id/prefix/segment
+                        // Regex to strip the prefix and tenant from the downstream URL
                         String rewriteRegex = "/(?<gTId>[^/]+)/" + def.getPrefix() + "(?<segment>.*)";
 
                         return Mono.just(builder.routes()
@@ -51,14 +53,25 @@ public class GatewayService implements RouteLocator {
                                         .and()
                                         .method(HttpMethod.valueOf(def.getMethod()))
                                         .filters(f -> f
-                                                // 1. Extract tenantId from URL and add X-Tenant-Id Header
+                                                // 1. Extract tenantId, VALIDATE ACCESS, and add X-Tenant-Id Header
                                                 .filter((exchange, chain) -> {
                                                     String path = exchange.getRequest().getURI().getPath();
                                                     // Path structure: /{tenantId}/{prefix}/...
-                                                    // Split: ["", "tenantId", ...]
                                                     String[] parts = path.split("/");
-                                                    if (parts.length > 1) {
+                                                    if (parts.length > 2) {
                                                         String tenantId = parts[1];
+                                                        
+                                                        // --- VALIDATION LOGIC ---
+                                                        // Check if this tenant is allowed to access this specific module prefix
+                                                        String targetModulePrefix = def.getPrefix();
+                                                        
+                                                        if (!tenantAccessService.isAccessAllowed(tenantId, targetModulePrefix)) {
+                                                            log.warn("Access Denied: Tenant '{}' attempted to access module prefix '{}'", tenantId, targetModulePrefix);
+                                                            exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                                                            return exchange.getResponse().setComplete();
+                                                        }
+                                                        // ------------------------
+
                                                         ServerHttpRequest request = exchange.getRequest().mutate()
                                                                 .header("X-Tenant-Id", tenantId)
                                                                 .build();
@@ -66,7 +79,7 @@ public class GatewayService implements RouteLocator {
                                                     }
                                                     return chain.filter(exchange);
                                                 })
-                                                // 2. Rewrite path: Keep only the ${segment}
+                                                // 2. Rewrite path
                                                 .rewritePath(rewriteRegex, "${segment}")
                                         )
                                         .uri(def.getBaseUrl()))

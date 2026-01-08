@@ -9,6 +9,10 @@ import lombok.EqualsAndHashCode;
 public class ResourceAlreadyExistsException extends RuntimeException{
     private Class<?> entityClass;
     private String id;
+    public ResourceAlreadyExistsException(String message){
+        super(message);
+    }
+
 
     public ResourceAlreadyExistsException(Class<?> entityClass, Object id){
         super("Resource of type "+entityClass.getSimpleName()+" with id "+getIdString(id)+" already exists");
