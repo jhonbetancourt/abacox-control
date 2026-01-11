@@ -50,11 +50,13 @@ public class TenantAccessService extends CrudService<TenantModuleAccess, UUID, T
 
     @Transactional
     public TenantModuleAccess create(CreateTenantModuleAccess dto) {
-        // Prevent duplicates
-        if (getRepository().existsByTenantIdAndModulePrefix(dto.getTenantId(), dto.getModulePrefix())) {
-            // Depending on preference, you can throw exception or return existing. 
-            // For single create, throwing exception is better.
-            throw new IllegalArgumentException("Rule already exists for " + dto.getTenantId() + " -> " + dto.getModulePrefix());
+        // Try to find existing
+        Optional<TenantModuleAccess> existing = getRepository()
+                .findByTenantIdAndModulePrefix(dto.getTenantId(), dto.getModulePrefix());
+
+        if (existing.isPresent()) {
+            log.info("Rule already exists for {} -> {}. Ignoring creation.", dto.getTenantId(), dto.getModulePrefix());
+            return existing.get();
         }
 
         TenantModuleAccess entity = TenantModuleAccess.builder()
@@ -63,33 +65,42 @@ public class TenantAccessService extends CrudService<TenantModuleAccess, UUID, T
                 .build();
 
         TenantModuleAccess saved = save(entity);
-        refreshCache(); // Update Cache immediately
+        refreshCache(); 
         return saved;
     }
 
     @Transactional
     public List<TenantModuleAccess> createAll(List<CreateTenantModuleAccess> dtos) {
         List<TenantModuleAccess> toSave = new ArrayList<>();
-        
+        List<TenantModuleAccess> alreadyExisting = new ArrayList<>();
+
         for (CreateTenantModuleAccess dto : dtos) {
-            // Check DB to avoid UniqueConstraint violations
-            if (!getRepository().existsByTenantIdAndModulePrefix(dto.getTenantId(), dto.getModulePrefix())) {
+            // Check DB 
+            Optional<TenantModuleAccess> existing = getRepository()
+                    .findByTenantIdAndModulePrefix(dto.getTenantId(), dto.getModulePrefix());
+
+            if (existing.isPresent()) {
+                log.info("Rule already exists for {} -> {}. Skipping save.", dto.getTenantId(), dto.getModulePrefix());
+                alreadyExisting.add(existing.get());
+            } else {
+                // Prepare new entity
                 toSave.add(TenantModuleAccess.builder()
                         .tenantId(dto.getTenantId())
                         .modulePrefix(dto.getModulePrefix())
                         .build());
-            } else {
-                log.warn("Skipping duplicate rule creation for Tenant: {} Prefix: {}", dto.getTenantId(), dto.getModulePrefix());
             }
         }
 
-        if (toSave.isEmpty()) {
-            return Collections.emptyList();
+        List<TenantModuleAccess> saved = new ArrayList<>();
+        if (!toSave.isEmpty()) {
+            saved = getRepository().saveAll(toSave);
+            refreshCache(); // Update Cache ONCE after batch if changes were made
         }
 
-        List<TenantModuleAccess> saved = getRepository().saveAll(toSave);
-        refreshCache(); // Update Cache ONCE after batch
-        return saved;
+        // Return combined list of what was just saved + what was already there
+        List<TenantModuleAccess> result = new ArrayList<>(saved);
+        result.addAll(alreadyExisting);
+        return result;
     }
 
     @Override
@@ -102,7 +113,7 @@ public class TenantAccessService extends CrudService<TenantModuleAccess, UUID, T
     @Transactional
     public void deleteAll(List<UUID> ids) {
         getRepository().deleteAllById(ids);
-        refreshCache(); // Update Cache ONCE after batch
+        refreshCache(); 
     }
 
     @Override
