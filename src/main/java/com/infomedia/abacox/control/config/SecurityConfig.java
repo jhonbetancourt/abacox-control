@@ -27,9 +27,6 @@ public class SecurityConfig {
     @Value("${abacox.internal-api-key:#{null}}")
     private String internalApiKey;
 
-    @Value("${abacox.orchestrator-url}")
-    private String orchestratorUrl;
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -56,7 +53,7 @@ public class SecurityConfig {
                     .pathMatchers(HttpMethod.OPTIONS).permitAll() // Allow OPTIONS requests
                     .anyExchange().authenticated()
             )
-            .addFilterAt(new UsersModuleJwtAuthenticationFilter(moduleService, internalApiKey, objectMapper, orchestratorUrl), SecurityWebFiltersOrder.AUTHENTICATION)
+            .addFilterAt(new UsersModuleJwtAuthenticationFilter(moduleService, internalApiKey, objectMapper), SecurityWebFiltersOrder.AUTHENTICATION)
             .securityContextRepository(NoOpServerSecurityContextRepository.getInstance());
         
         return http.build();

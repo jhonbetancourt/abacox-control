@@ -20,7 +20,6 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 import com.infomedia.abacox.control.entity.Module;
 
-import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 @Log4j2
@@ -30,20 +29,13 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
     private final ModuleService moduleService;
     private final String internalApiKey;
     private final ObjectMapper objectMapper;
-    private final String suVerificationUrl;
 
     private static final String VALIDATE_ACCESS_TOKEN_PATH = "/api/auth/validateAccessToken";
     private static final String VALIDATE_DOWNLOAD_TOKEN_PATH = "/api/auth/validateDownloadToken";
-    private static final String SU_USERNAME_PREFIX = "abacox-su@";
 
-    public JsonNode validateAccessToken(String token, boolean isSu, String tenantId) {
-        String verificationUrl;
-        if (isSu) {
-            verificationUrl = suVerificationUrl;
-        } else {
-            Module usersModule = moduleService.getUsersModule();
-            verificationUrl = usersModule.getUrl();
-        }
+    public JsonNode validateAccessToken(String token, String tenantId) {
+        Module usersModule = moduleService.getUsersModule();
+        String verificationUrl = usersModule.getUrl();
 
         RestClient.Builder restClientBuilder = RestClient.builder()
                 .baseUrl(verificationUrl);
@@ -77,14 +69,9 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
                 .body(JsonNode.class);
     }
 
-    public JsonNode validateDownloadToken(String token, boolean isSu, String tenantId) {
-        String verificationUrl;
-        if (isSu) {
-            verificationUrl = suVerificationUrl;
-        } else {
-            Module usersModule = moduleService.getUsersModule();
-            verificationUrl = usersModule.getUrl();
-        }
+    public JsonNode validateDownloadToken(String token, String tenantId) {
+        Module usersModule = moduleService.getUsersModule();
+        String verificationUrl = usersModule.getUrl();
 
         RestClient.Builder restClientBuilder = RestClient.builder()
                 .baseUrl(verificationUrl);
@@ -129,9 +116,6 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             throw new RuntimeException(e);
         }
 
-        log.info("Method: {} Path: {} Secured: {}",
-            exchange.getRequest().getMethod().name(), exchange.getRequest().getPath().value(), secured);
-
         String token = extractAccessToken(exchange);
         String queryToken = extractDownloadToken(exchange);
         String internalKey = extractInternalApiKey(exchange);
@@ -150,34 +134,25 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
         // We also exclude paths for the control module itself, which start with /control.
         if (pathParts.length > 2 && !"control".equals(pathParts[1])) {
             tenantId = pathParts[1];
-            log.info("Tenant context identified: {}", tenantId);
         }
 
         if (secured && token != null) {
-            log.info("Access token: " + token.substring(0, Math.min(token.length(), 15)) + "...");
-            boolean isSu = isSuAccessToken(token);
             // Pass tenantId to validation method
-            userJson = validateAccessToken(token, isSu, tenantId);
+            userJson = validateAccessToken(token, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
-                if(isSu) username = SU_USERNAME_PREFIX + username;
             }
         } else if (secured && queryToken != null) {
-            log.info("Download token: " + queryToken);
-            boolean isSu = isSuDownloadToken(queryToken);
             // Pass tenantId to validation method
-            userJson = validateDownloadToken(queryToken, isSu, tenantId);
+            userJson = validateDownloadToken(queryToken, tenantId);
             if(userJson.has("username")){
                 username = userJson.get("username").asText();
-                if(isSu) username = SU_USERNAME_PREFIX + username;
             }
         } else if (internalApiKey != null && internalApiKey.equals(internalKey)) {
-            log.info("Internal API key matched");
             username = "system";
         }
 
         if (username.equals("anonymousUser")&&!secured || !username.equals("anonymousUser")&&secured) {
-            log.info("Authenticated user: " + username);
             if(userJson != null){
                 exchange.getRequest().mutate()
                         .header("X-Username", username)
@@ -212,14 +187,5 @@ public class UsersModuleJwtAuthenticationFilter implements WebFilter {
             return exchange.getRequest().getQueryParams().getFirst("t");
         }
         return null;
-    }
-
-    private boolean isSuDownloadToken(String token) {
-        return token != null && token.startsWith("SUDL_");
-    }
-
-    private boolean isSuAccessToken(String token) {
-        Map<String, Object> headers = JwtUnverifiedParser.getHeaders(token);
-        return headers != null && "true".equals(String.valueOf(headers.get("su")));
     }
 }
