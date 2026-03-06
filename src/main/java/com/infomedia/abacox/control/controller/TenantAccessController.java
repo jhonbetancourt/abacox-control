@@ -79,4 +79,5 @@ public class TenantAccessController {
             , @Parameter(hidden = true) Pageable pageable) {
         return modelConverter.mapPage(tenantAccessService.find(spec, pageable), TenantModuleAccessDto.class);
     }
+
 }

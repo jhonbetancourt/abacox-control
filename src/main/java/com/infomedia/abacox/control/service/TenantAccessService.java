@@ -48,6 +48,10 @@ public class TenantAccessService extends CrudService<TenantModuleAccess, UUID, T
         return allowedModules != null && allowedModules.contains(modulePrefix);
     }
 
+    public Set<String> getModuleAccess(String tenantId) {
+        return accessCache.getOrDefault(tenantId, Collections.emptySet());
+    }
+
     @Transactional
     public TenantModuleAccess create(CreateTenantModuleAccess dto) {
         // Try to find existing
