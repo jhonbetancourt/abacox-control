@@ -1,0 +1,11 @@
+{
+  "name": "control",
+  "displayName": "Control",
+  "usesDatabase": true,
+  "usesObjectStorage": false,
+  "containerPort": 8080,
+  "memoryLimit": "2048M",
+  "coreModule": true,
+  "dockerfilePath": "Dockerfile",
+  "contextPath": "."
+}
