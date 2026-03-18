@@ -8,5 +8,11 @@
   "coreModule": true,
   "dockerfilePath": "Dockerfile",
   "contextPath": ".",
-  "dependsOn": []
+  "dependsOn": [],
+  "requiresControlRegistration": false,
+  "skipHealthCheck": false,
+  "healthCheckPath": "/control/api/health",
+  "jpaHibernateDdlAuto": "update",
+  "forwardHeadersNative": true,
+  "traefikPathPrefix": "/service"
 }
