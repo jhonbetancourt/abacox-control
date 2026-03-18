@@ -3,7 +3,6 @@ package com.infomedia.abacox.control.controller;
 import com.infomedia.abacox.control.component.modeltools.ModelConverter;
 import com.infomedia.abacox.control.component.springfilter.boot.Filter;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
-import com.infomedia.abacox.control.dto.module.ModuleConnectedDto;
 import com.infomedia.abacox.control.dto.module.ModuleDto;
 import com.infomedia.abacox.control.dto.module.ModuleEndpointDto;
 import com.infomedia.abacox.control.dto.superclass.ActivationDto;
@@ -42,11 +41,6 @@ public class ModuleController {
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ModuleDto create(@Valid @RequestBody CreateModuleUrl createModule) {
         return modelConverter.map(moduleService.create(createModule), ModuleDto.class);
-    }
-
-    @GetMapping(value = "/connected/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ModuleConnectedDto connected(@PathVariable UUID id) {
-        return new ModuleConnectedDto(moduleService.isModuleConnected(id));
     }
 
     @PatchMapping(value = "/status/{id}", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)

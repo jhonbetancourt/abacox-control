@@ -1,6 +1,5 @@
 package com.infomedia.abacox.control.service;
 
-import com.infomedia.abacox.control.component.events.EventsWebSocketClient;
 import com.infomedia.abacox.control.constants.ModuleType;
 import com.infomedia.abacox.control.dto.gateway.RouteDefinition;
 import com.infomedia.abacox.control.dto.module.CreateModuleUrl;
@@ -49,15 +48,14 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     private final GatewayService gatewayService;
     private final ApplicationContext applicationContext;
     private RestClient restClient;
-    private final EventsWebSocketClient eventsWebSocketClient;
     private final ModuleEndpointRepository moduleEndpointRepository;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
-    public ModuleService(ModuleRepository repository, GatewayService gatewayService, ApplicationContext applicationContext
-            , EventsWebSocketClient eventsWebSocketClient, ModuleEndpointRepository moduleEndpointRepository) {
+
+    public ModuleService(ModuleRepository repository, GatewayService gatewayService, ApplicationContext applicationContext,
+            ModuleEndpointRepository moduleEndpointRepository) {
         super(repository);
         this.gatewayService = gatewayService;
         this.applicationContext = applicationContext;
-        this.eventsWebSocketClient = eventsWebSocketClient;
         this.moduleEndpointRepository = moduleEndpointRepository;
         restClient = RestClient.builder().build();
     }
@@ -179,7 +177,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
             module = save(buildFromDto(cDto, moduleInfo));
         }
         updateGateway();
-        eventsWebSocketClient.connect(module);
         return module;
     }
 
@@ -188,7 +185,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         Module module = get(id);
         deleteById(id);
         updateGateway();
-        eventsWebSocketClient.disconnect(module);
     }
 
     public Module getUsersModule() {
@@ -204,11 +200,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
         validateActivation(active, module);
         module = super.changeActivation(id, active);
         updateGateway();
-        if(module.isActive()) {
-            eventsWebSocketClient.connect(module);
-        }else{
-            eventsWebSocketClient.disconnect(module);
-        }
         return module;
     }
 
@@ -336,7 +327,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
                 }
             }
         });
-        endpointInfos.add(new MEndpointInfo(RequestMethod.GET.toString(), "/websocket/**", true));
         endpointInfos.sort(Comparator.comparing(MEndpointInfo::getPath));
         return endpointInfos;
     }
@@ -344,17 +334,6 @@ public class ModuleService extends CrudService<Module, UUID, ModuleRepository> {
     public void initModules() {
         initControlModule();
         updateGateway();
-        for (Module module : getRepository().findByTypeNotAndActive(ModuleType.CONTROL, true)) {
-            eventsWebSocketClient.connect(module);
-        }
-    }
-
-    public boolean isModuleConnected(UUID moduleId) {
-        Module module = get(moduleId);
-        if(module.getType().equals(ModuleType.CONTROL)){
-            return true;
-        }
-        return eventsWebSocketClient.isConnected(module);
     }
 
     @Transactional
