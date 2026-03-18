@@ -31,7 +31,7 @@ public class ControlQueryHandler {
     private final TenantAccessService tenantAccessService;
 
     @RabbitListener(queues = RabbitMQConfig.CONTROL_QUERIES_QUEUE)
-    public Object handleQuery(InternalMessage request) {
+    public InternalMessage handleQuery(InternalMessage request) {
         log.debug("Received query [{}] from [{}]", request.getType(), request.getSourceModule());
         try {
             return switch (request.getType()) {
@@ -39,31 +39,49 @@ public class ControlQueryHandler {
                 case "MODULE_ACCESS_QUERY" -> handleModuleAccess(request);
                 default -> {
                     log.warn("Unknown query type [{}] from [{}]", request.getType(), request.getSourceModule());
-                    yield Map.of("error", "Unknown query type: " + request.getType());
+                    yield error(request, "Unknown query type: " + request.getType());
                 }
             };
         } catch (Exception e) {
             log.error("Error handling query [{}]: {}", request.getType(), e.getMessage(), e);
-            return Map.of("error", e.getMessage());
+            return error(request, e.getMessage());
         }
     }
 
-    private Object handleModuleInfoByPrefix(InternalMessage request) {
+    private InternalMessage handleModuleInfoByPrefix(InternalMessage request) {
         String prefix = extractString(request, "prefix");
         if (prefix == null) {
-            return Map.of("error", "prefix is required for MODULE_INFO_BY_PREFIX_QUERY");
+            return error(request, "prefix is required for MODULE_INFO_BY_PREFIX_QUERY");
         }
-        return moduleService.getInfoByPrefix(prefix);
+        return success(request, moduleService.getInfoByPrefix(prefix));
     }
 
-    private Object handleModuleAccess(InternalMessage request) {
+    private InternalMessage handleModuleAccess(InternalMessage request) {
         String tenant = request.getTenant() != null
                 ? request.getTenant()
                 : extractString(request, "tenant");
         if (tenant == null) {
-            return Map.of("error", "tenant is required for MODULE_ACCESS_QUERY");
+            return error(request, "tenant is required for MODULE_ACCESS_QUERY");
         }
-        return tenantAccessService.getModuleAccess(tenant);
+        return success(request, tenantAccessService.getModuleAccess(tenant));
+    }
+
+    private InternalMessage success(InternalMessage request, Object payload) {
+        return InternalMessage.builder()
+                .sourceModule("control")
+                .type(request.getType() + "_RESPONSE")
+                .correlationId(request.getCorrelationId())
+                .payload(payload)
+                .build();
+    }
+
+    private InternalMessage error(InternalMessage request, String message) {
+        return InternalMessage.builder()
+                .sourceModule("control")
+                .type(request.getType() + "_ERROR")
+                .correlationId(request.getCorrelationId())
+                .payload(message)
+                .build();
     }
 
     @SuppressWarnings("unchecked")
