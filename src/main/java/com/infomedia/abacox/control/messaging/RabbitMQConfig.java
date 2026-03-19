@@ -74,6 +74,7 @@ public class RabbitMQConfig {
                                          Jackson2JsonMessageConverter messageConverter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(messageConverter);
+        template.setReplyTimeout(30_000L);
         return template;
     }
 
@@ -84,6 +85,7 @@ public class RabbitMQConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setMessageConverter(messageConverter);
+        factory.setDefaultRequeueRejected(false);
         return factory;
     }
 }
