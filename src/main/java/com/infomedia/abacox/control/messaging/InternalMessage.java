@@ -33,6 +33,10 @@ public class InternalMessage {
     /** Arbitrary payload — serialized as JSON. */
     private Object payload;
 
+    /** True if this is a successful response; false if it represents an error. */
+    @Builder.Default
+    private boolean success = true;
+
     /** Correlation ID for RPC-style request/response matching. */
     @Builder.Default
     private UUID correlationId = UUID.randomUUID();

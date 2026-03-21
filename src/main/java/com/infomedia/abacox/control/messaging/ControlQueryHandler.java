@@ -69,8 +69,9 @@ public class ControlQueryHandler {
     private InternalMessage success(InternalMessage request, Object payload) {
         return InternalMessage.builder()
                 .sourceModule("control")
-                .type(request.getType() + "_RESPONSE")
+                .type(request.getType())
                 .correlationId(request.getCorrelationId())
+                .success(true)
                 .payload(payload)
                 .build();
     }
@@ -78,8 +79,9 @@ public class ControlQueryHandler {
     private InternalMessage error(InternalMessage request, String message) {
         return InternalMessage.builder()
                 .sourceModule("control")
-                .type(request.getType() + "_ERROR")
+                .type(request.getType())
                 .correlationId(request.getCorrelationId())
+                .success(false)
                 .payload(message)
                 .build();
     }
