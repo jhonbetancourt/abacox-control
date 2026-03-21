@@ -1,13 +1,18 @@
 package com.infomedia.abacox.control.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infomedia.abacox.control.service.AuthService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.UUID;
 
 /**
@@ -45,13 +50,19 @@ public class MessagingService {
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final String moduleName;
+    private final AuthService authService;
+    private final ControlQueryHandler queryHandler;
 
     public MessagingService(RabbitTemplate rabbitTemplate,
                             ObjectMapper objectMapper,
-                            @Value("${spring.application.name}") String moduleName) {
+                            @Value("${spring.application.name}") String moduleName,
+                            AuthService authService,
+                            ControlQueryHandler queryHandler) {
         this.rabbitTemplate = rabbitTemplate;
         this.objectMapper = objectMapper;
         this.moduleName = moduleName;
+        this.authService = authService;
+        this.queryHandler = queryHandler;
     }
 
     /**
@@ -70,6 +81,7 @@ public class MessagingService {
                 .sourceModule(moduleName)
                 .type(type)
                 .payload(payload)
+                .actor(authService.getUsername())
                 .build();
 
         log.debug("Publishing event [{}] with routing key [{}]", type, routingKey);
@@ -90,6 +102,7 @@ public class MessagingService {
                 .sourceModule(moduleName)
                 .type(type)
                 .payload(payload)
+                .actor(authService.getUsername())
                 .build();
 
         log.debug("Sending query [{}] to [{}]", type, targetModule);
@@ -133,8 +146,9 @@ public class MessagingService {
 
         InternalMessage response = InternalMessage.builder()
                 .sourceModule(moduleName)
-                .type(request.getType() + "_RESPONSE")
+                .type(request.getType())
                 .correlationId(request.getCorrelationId())
+                .success(true)
                 .payload(responsePayload)
                 .build();
 
@@ -150,5 +164,23 @@ public class MessagingService {
      */
     public void publishPlatformEvent(String type, Object payload) {
         publishEvent(null, type, payload);
+    }
+
+    @RabbitListener(queues = RabbitMQConfig.CONTROL_QUERIES_QUEUE)
+    public InternalMessage handleQuery(InternalMessage request) {
+        applyActor(request.getActor());
+        return queryHandler.handle(request);
+    }
+
+    /**
+     * Populates the Spring SecurityContext with the actor from the incoming message.
+     * This allows @CreatedBy / @LastModifiedBy and AuthService.getUsername() to work
+     * correctly inside RabbitMQ listener threads.
+     */
+    private void applyActor(String actor) {
+        String name = (actor != null && !actor.isBlank()) ? actor : "system";
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(name, null, Collections.emptyList())
+        );
     }
 }

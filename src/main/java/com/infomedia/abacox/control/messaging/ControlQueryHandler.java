@@ -4,7 +4,6 @@ import com.infomedia.abacox.control.service.ModuleService;
 import com.infomedia.abacox.control.service.TenantAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -30,9 +29,8 @@ public class ControlQueryHandler {
     private final ModuleService moduleService;
     private final TenantAccessService tenantAccessService;
 
-    @RabbitListener(queues = RabbitMQConfig.CONTROL_QUERIES_QUEUE)
-    public InternalMessage handleQuery(InternalMessage request) {
-        log.debug("Received query [{}] from [{}]", request.getType(), request.getSourceModule());
+    public InternalMessage handle(InternalMessage request) {
+        log.debug("Received query [{}] from [{}] (actor: {})", request.getType(), request.getSourceModule(), request.getActor());
         try {
             return switch (request.getType()) {
                 case "MODULE_INFO_BY_PREFIX_QUERY" -> handleModuleInfoByPrefix(request);

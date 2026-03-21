@@ -37,6 +37,9 @@ public class InternalMessage {
     @Builder.Default
     private boolean success = true;
 
+    /** Username of the user that triggered this message (from SecurityContext). */
+    private String actor;
+
     /** Correlation ID for RPC-style request/response matching. */
     @Builder.Default
     private UUID correlationId = UUID.randomUUID();
